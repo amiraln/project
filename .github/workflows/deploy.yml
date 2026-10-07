@@ -1,0 +1,79 @@
+# Выкладка на сервер: тесты → сборка сайта → архив → копия на сервер → deploy/deploy.sh (то же, что вручную по README).
+# Секреты репозитория (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY — закрытый ключ, открытая часть которого есть в ~/.ssh/authorized_keys пользователя ubuntu на сервере
+#   DEPLOY_HOST    — IP или домен сервера
+# Пользователю ubuntu нужен sudo без пароля: deploy.sh запускается через sudo.
+name: Deploy
+
+on:
+  workflow_dispatch:  # кнопка «Run workflow» во вкладке Actions — когда файл попадёт в main
+  push:
+    branches: [claude/beautiful-feynman-lqb9e1]
+
+concurrency:
+  group: deploy  # одна выкладка за раз
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Секреты на месте
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_HOST" ]; then
+            echo "::error::Добавьте секреты DEPLOY_SSH_KEY и DEPLOY_HOST: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Тесты
+        working-directory: backend
+        env:
+          DJANGO_DEBUG: "1"
+        run: |
+          pip install -q -r requirements.txt
+          python manage.py makemigrations --check --dry-run
+          python manage.py test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Сборка сайта
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - name: Архив
+        run: >-
+          tar -czf botakanym-deploy.tar.gz --owner=0 --group=0
+          --exclude=venv --exclude=__pycache__ --exclude=.cache --exclude=.env
+          --exclude=db.sqlite3 --exclude=staticfiles --exclude=media
+          backend deploy frontend/dist
+
+      - name: Выкладка
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -T 15 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          SSH="ssh -i $HOME/.ssh/deploy -o BatchMode=yes ubuntu@$DEPLOY_HOST"
+          scp -i ~/.ssh/deploy -o BatchMode=yes botakanym-deploy.tar.gz "ubuntu@$DEPLOY_HOST:/tmp/"
+          $SSH "sudo -n tar -xzf /tmp/botakanym-deploy.tar.gz -C /var/www/kindergarten-site \
+                && sudo -n bash /var/www/kindergarten-site/deploy/deploy.sh \
+                && rm -f /tmp/botakanym-deploy.tar.gz"
