@@ -69,19 +69,26 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           install -m 700 -d ~/.ssh
-          # Ключ, вставленный из Windows, приходит с \r, пробелами или в одну строку — собираем его заново
+          fail() { echo "::error::DEPLOY_SSH_KEY: $1. Вставьте целиком файл botakanym_deploy (без .pub) — от -----BEGIN до -----END"; exit 1; }
+          # Ключ, вставленный из Windows, приходит с \r, пробелами, в одну строку или с текстом вокруг — собираем его заново.
+          # В сообщениях об ошибке — только что не так, без содержимого секрета.
           key=$(printf '%s' "$DEPLOY_SSH_KEY" | tr -d '\r')
-          if printf '%s' "$key" | grep -q 'BEGIN OPENSSH PRIVATE KEY'; then
-            body=$(printf '%s' "$key" | sed -e 's/-----BEGIN OPENSSH PRIVATE KEY-----//' -e 's/-----END OPENSSH PRIVATE KEY-----//' | tr -d ' \t\n')
-            { echo "-----BEGIN OPENSSH PRIVATE KEY-----"; printf '%s\n' "$body" | fold -w 70; echo "-----END OPENSSH PRIVATE KEY-----"; } > ~/.ssh/deploy
-          else
-            printf '%s\n' "$key" > ~/.ssh/deploy
-          fi
+          key=${key#"${key%%[![:space:]]*}"}
+          begin='-----BEGIN OPENSSH PRIVATE KEY-----'
+          end='-----END OPENSSH PRIVATE KEY-----'
+          case "$key" in
+            *"$begin"*"$end"*)
+              body=${key#*"$begin"}
+              body=$(printf '%s' "${body%%"$end"*}" | tr -d ' \t\n')
+              { echo "$begin"; printf '%s\n' "$body" | fold -w 70; echo "$end"; } > ~/.ssh/deploy ;;
+            ssh-*) fail "это открытый ключ (файл .pub), нужен закрытый" ;;
+            *PuTTY*) fail "это ключ PuTTY (.ppk), нужен ключ OpenSSH из ssh-keygen" ;;
+            *"$begin"*) fail "ключ обрезан — нет последней строки $end" ;;
+            *-----BEGIN*) printf '%s\n' "$key" > ~/.ssh/deploy ;;  # другой формат (RSA, PEM) — как есть
+            *) fail "это не ключ — нет строки $begin" ;;
+          esac
           chmod 600 ~/.ssh/deploy
-          if ! ssh-keygen -y -P "" -f ~/.ssh/deploy > ~/.ssh/deploy.pub; then
-            echo "::error::DEPLOY_SSH_KEY — не закрытый ключ без пароля. Вставьте весь файл botakanym_deploy (не .pub), от -----BEGIN до -----END"
-            exit 1
-          fi
+          ssh-keygen -y -P "" -f ~/.ssh/deploy > ~/.ssh/deploy.pub || fail "ключ повреждён при копировании или защищён паролем"
           echo "Отпечаток ключа из DEPLOY_SSH_KEY (сравните: ssh-keygen -lf botakanym_deploy.pub):"
           ssh-keygen -lf ~/.ssh/deploy.pub
           ssh-keyscan -T 15 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
