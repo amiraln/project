@@ -15,6 +15,10 @@
   .pay-form input{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
   .pay-form select{min-height:41px;font-size:15px;font-weight:600}
   .pay-form .pay-hint{grid-column:1/-1;margin-top:-4px;color:var(--muted);font-size:12px}
+  .pay-form .check{grid-column:1/-1;display:flex;align-items:flex-start;gap:10px;font-weight:600;cursor:pointer}
+  .pay-form .check input{flex:none;width:18px;height:18px;margin-top:1px}
+  .pay-form .check small{display:block;color:var(--muted);font-size:12px;font-weight:400}
+  .profile h2 .badge{vertical-align:4px}
   .save-status{grid-column:1/-1;min-height:20px;font-size:13px;color:var(--muted)}
   .save-status.ok{color:var(--green)}
   .save-status.err{color:var(--red)}
@@ -81,14 +85,13 @@
 <div class="profile">
   <div class="avatar" aria-hidden="true">{{ child.fio|first }}</div>
   <div>
-    <h2>{{ child.fio }}</h2>
+    <h2>{{ child.fio }} <span class="badge badge-family" id="family-badge"{% if not child.large_family %} hidden{% endif %}>многодетная</span></h2>
     <p class="facts"><span>ИИН <b>{{ child.iin|default:"—" }}</b></span><span>Возраст <b>{{ child.age|default:"—" }}</b></span><span>Группа <b>{{ child.group|default:"—" }}</b></span></p>
     <p class="facts">
       <span>Договор <b>{% if pupil.contract_number or pupil.contract_date %}{% if pupil.contract_number %}№ {{ pupil.contract_number }}{% endif %}{% if pupil.contract_date %} от {{ pupil.contract_date|date:"d.m.Y" }}{% endif %}{% else %}—{% endif %}</b></span>
       <span>Адрес <b>{{ pupil.address|default:"—" }}</b></span>
     </p>
     <p class="facts">
-      <span>Семья <b>{% if child.large_family %}<span class="badge badge-family">многодетная</span>{% else %}—{% endif %}</b>{% if pupil %} <a href="{% url 'admin:payments_child_change' pupil.pk %}" title="Многодетная семья: определять по родителям, «да» или «нет»">изменить</a>{% endif %}</span>
       <span>Братья и сёстры <b>{% for s in siblings %}<a href="{% url 'payments:child_detail' s.p_id %}?month={{ month }}">{{ s.fio }}</a>{% if s.group_name %} ({{ s.group_name }}){% endif %}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</b></span>
     </p>
   </div>
@@ -128,8 +131,9 @@
           </select>
         </label>
         <label class="field"><span>Оплата в прошлом месяце, ₸</span><input type="text" inputmode="decimal" name="last_payment" value="{{ child.last_payment|floatformat:"0" }}" autocomplete="off"></label>
-        <label class="field"><span>Ежемесячная оплата, ₸</span><input type="text" inputmode="decimal" name="monthly" value="{% if not child.monthly_default %}{{ child.monthly|floatformat:"0" }}{% endif %}" placeholder="{{ default_monthly|floatformat:"0g" }} — по умолчанию" autocomplete="off"></label>
-        <p class="pay-hint">Пустое поле — по умолчанию: {{ default_monthly|floatformat:"0g" }} ₸{% if child.large_family %} (многодетная семья){% endif %}. Способ оплаты без суммы записывает сумму к оплате.</p>
+        <label class="field"><span>Ежемесячная оплата, ₸</span><input type="text" inputmode="decimal" name="monthly" value="{% if not child.monthly_default %}{{ child.monthly|floatformat:"0" }}{% endif %}" placeholder="{{ child.default_monthly|floatformat:"0g" }} — по умолчанию" autocomplete="off"></label>
+        <label class="check"><input type="checkbox" name="large_family"{% if child.large_family %} checked{% endif %}><span>Многодетная семья<small>Ежемесячная по умолчанию — {{ large_family_monthly|floatformat:"0g" }} ₸. Отметка остаётся после очистки месяца.</small></span></label>
+        <p class="pay-hint">Пустое поле ежемесячной оплаты — по умолчанию (сейчас <span id="default-monthly">{{ child.default_monthly|floatformat:"0g" }}</span> ₸). Способ оплаты без суммы записывает сумму к оплате.</p>
         <p class="save-status" id="pay-status" aria-live="polite">Сохраняется автоматически</p>
       </form>
     </section>
@@ -216,12 +220,16 @@
     fields.method.value = totals.method;
     fields.last_payment.value = Math.round(totals.last_payment);
     fields.monthly.value = totals.monthly_default ? "" : Math.round(totals.monthly);
+    fields.monthly.placeholder = money(totals.default_monthly) + " — по умолчанию";
+    fields.large_family.checked = totals.large_family;
+    document.getElementById("default-monthly").textContent = money(totals.default_monthly);
+    document.getElementById("family-badge").hidden = !totals.large_family;
   }
   async function savePayment(e) {
     payStatus.className = "save-status";
     payStatus.textContent = "Сохранение…";
     try {
-      const res = await postJSON("{% url 'payments:save_payment' %}", {...CHILD, [e.target.name]: e.target.value});
+      const res = await postJSON("{% url 'payments:save_payment' %}", {...CHILD, [e.target.name]: e.target.type === "checkbox" ? e.target.checked : e.target.value});
       showTotals(res.totals);
       showPayment(res.totals);
       payStatus.className = "save-status ok";

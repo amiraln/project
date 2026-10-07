@@ -59,10 +59,9 @@ class Child(models.Model):
     contract_date = models.DateField("Дата подписания договора", null=True, blank=True,
                                      help_text="Она же дата зачисления в медицинских журналах.")
     large_family = models.BooleanField(
-        "Многодетная семья", null=True, blank=True,
-        choices=[(None, "Определять по родителям"), (True, "Да"), (False, "Нет")],
-        help_text="По родителям — многодетная, если в табеле за месяц есть ещё ребёнок того же родителя "
-                  "(по ИИН родителя из e-orda). «Да» — например, если остальные дети в сад не ходят.",
+        "Многодетная семья", default=False,
+        help_text="Ставится вручную. Ежемесячная оплата по умолчанию — 51 000 ₸. "
+                  "Отметка остаётся после очистки месяца и новой загрузки табеля.",
     )
 
     class Meta:
@@ -97,8 +96,29 @@ def sync_children(p_ids=None):
     )
 
 
+def large_family_records(records):
+    """(месяц, p_id) строк табеля, чьи дети отмечены как многодетные. Отметка хранится у воспитанника;
+    ищем и по ИИН — в новом табеле у ребёнка может оказаться другой id."""
+    marked = Child.objects.filter(large_family=True).values_list("p_id", "iin")
+    p_ids = {p_id for p_id, _ in marked}
+    iins = {iin for _, iin in marked if iin}
+    return {(rec.month, rec.p_id) for rec in records if rec.p_id in p_ids or (rec.iin and rec.iin in iins)}
+
+
+def set_large_family(rec, value):
+    """Отметить ребёнка из строки табеля многодетным или снять отметку — у воспитанника, не у месяца."""
+    if value:
+        child, _ = Child.objects.get_or_create(p_id=rec.p_id, defaults={
+            "iin": rec.iin, "fio": rec.fio, "group_name": rec.group_name, "last_month": rec.month})
+        if not child.large_family:
+            child.large_family = True
+            child.save(update_fields=["large_family"])
+    else:  # снимаем у всех записей ребёнка, иначе отметка нашлась бы по ИИН
+        Child.objects.filter(Q(p_id=rec.p_id) | Q(iin=rec.iin) if rec.iin else Q(p_id=rec.p_id)).update(large_family=False)
+
+
 class Families:
-    """Семьи: дети, у которых общий родитель (по ИИН родителя из контактов e-orda).
+    """Семьи: дети, у которых общий родитель (по ИИН родителя из контактов e-orda) — чтобы показать братьев и сестёр.
 
     Ребёнок в табеле может быть под разными id, поэтому дети сравниваются по ИИН, а без ИИН — по id."""
 
@@ -109,7 +129,6 @@ class Families:
         for child_pid, child_iin, parent_iin in Guardian.objects.values_list("child_pid", "child_iin", "iin"):
             if is_person_iin(parent_iin):
                 self._join(self.key(child_pid, child_iin), "parent " + parent_iin)
-        self.manual = {self.key(c.p_id, c.iin): c.large_family for c in self.children if c.large_family is not None}
         self.members = defaultdict(dict)  # семья → {ребёнок: воспитанник из последнего месяца}
         for c in sorted(self.children, key=lambda c: c.last_month):
             key = self.key(c.p_id, c.iin)
@@ -128,17 +147,6 @@ class Families:
         a, b = self._find(a), self._find(b)
         if a != b:
             self.parent[a] = b
-
-    def large(self, records):
-        """(месяц, p_id) детей из многодетных семей среди строк табеля: в табеле за тот же месяц
-        есть ещё ребёнок их родителя. Отметка воспитанника «Да»/«Нет» важнее.
-        Передавайте строки за весь месяц, а не одной группы: брат или сестра бывают в другой группе."""
-        keyed = [(rec, self.key(rec.p_id, rec.iin)) for rec in records]
-        kids = defaultdict(set)
-        for rec, key in keyed:
-            kids[rec.month, self._find(key)].add(key)
-        return {(rec.month, rec.p_id) for rec, key in keyed
-                if self.manual.get(key, len(kids[rec.month, self._find(key)]) > 1)}
 
     def siblings(self, p_id, iin=""):
         """Братья и сёстры ребёнка — воспитанники с общим родителем."""

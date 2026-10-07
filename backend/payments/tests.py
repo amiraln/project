@@ -133,7 +133,8 @@ def parent(child_pid, child_iin, iin, fio="Родитель"):
 
 
 class FamilyTests(TestCase):
-    """Дети одного родителя — многодетная семья: ежемесячная по умолчанию 51 000, у остальных — 60 000."""
+    """Многодетных отмечают вручную: ежемесячная по умолчанию 51 000, у остальных — 60 000.
+    Отметка — у воспитанника, поэтому остаётся после очистки месяца и новой загрузки табеля."""
 
     MOTHER = "900101400001"
 
@@ -154,49 +155,63 @@ class FamilyTests(TestCase):
     def setUp(self):
         self.client.force_login(self.admin)
 
-    def large(self, month="2026-09"):
-        return {p_id for _, p_id in Families().large(ChildRecord.objects.filter(month=month))}
+    def post(self, path, data):
+        return self.client.post(path, json.dumps(data), content_type="application/json")
 
-    def test_children_of_one_parent_are_a_large_family(self):
-        self.assertEqual(self.large(), {1, 2})
+    def monthly(self, month="2026-09"):
+        page = self.client.get(f"/payments/?month={month}")
+        return {r["pId"]: (r["monthly"], r["large_family"]) for r in page.context["records"]}
+
+    def test_children_of_one_parent_are_not_marked_automatically(self):
+        self.assertEqual(self.monthly(), {1: (60000, False), 2: (60000, False), 3: (60000, False)})
+        # связь с родителем остаётся: братья и сёстры видны в карточке
         self.assertEqual([c.fio for c in Families().siblings(1, "200101500001")], ["Иванова Сестра"])
         self.assertEqual(Families().siblings(3, "220101500003"), [])
-
-        page = self.client.get("/payments/?month=2026-09&group=1")  # сестра в другой группе — всё равно семья
-        monthly = {r["pId"]: (r["monthly"], r["large_family"]) for r in page.context["records"]}
-        self.assertEqual(monthly, {1: (51000, True), 3: (60000, False)})
-        self.assertContains(page, ">многодетная<", count=1)
-
-    def test_sibling_counts_only_in_months_both_are_in_the_timesheet(self):
-        record(1, "200101500001", month="2026-10")  # сестра в октябре в сад не ходит
-        self.assertEqual(self.large("2026-10"), set())
-
-    def test_same_child_under_two_ids_or_placeholder_parent_iin_is_not_a_family(self):
-        record(4, "200101500001", fio="Иванов Брат")  # тот же ребёнок под другим id
-        parent(3, "220101500003", "000000000000")
-        record(5, "230101500005", fio="Без ИИН родителя")
-        parent(5, "230101500005", "000000000000")  # заглушка вместо ИИН родителя
-        self.assertEqual(self.large(), {1, 2, 4})
-
-    def test_manual_mark_wins(self):
-        Child.objects.filter(p_id=3).update(large_family=True)  # остальные дети в сад не ходят
-        Child.objects.filter(p_id=2).update(large_family=False)
-        self.assertEqual(self.large(), {1, 3})
-
-    def test_child_card_and_parents_page_show_the_family(self):
         page = self.client.get("/payments/child/1/?month=2026-09")
-        self.assertTrue(page.context["child"]["large_family"])
         self.assertContains(page, 'href="/payments/child/2/?month=2026-09">Иванова Сестра</a>')
+
+    def test_mark_from_child_card(self):
+        totals = self.post("/payments/api/payment/", {"pId": 3, "month": "2026-09", "large_family": True}).json()["totals"]
+        self.assertEqual((totals["large_family"], totals["monthly"], totals["default_monthly"]), (True, 51000, 51000))
+        self.assertTrue(Child.objects.get(p_id=3).large_family)
+        self.assertFalse(PaymentInfo.objects.exists())  # оплату за месяц отметка не трогает
+        page = self.client.get("/payments/child/3/?month=2026-09")
+        self.assertContains(page, 'name="large_family" checked')
         self.assertContains(page, 'placeholder="51')
-        parents = self.client.get("/payments/parents/")
-        self.assertContains(parents, "Многодетная семья", count=2)
+        self.assertContains(self.client.get("/payments/parents/"), "Многодетная семья", count=1)
+
+        totals = self.post("/payments/api/payment/", {"pId": 3, "month": "2026-09", "large_family": False}).json()["totals"]
+        self.assertEqual((totals["large_family"], totals["monthly"]), (False, 60000))
+        self.assertEqual(self.post("/payments/api/payment/", {"pId": 3, "month": "2026-09", "large_family": "да"}).status_code, 400)
+
+    def test_bulk_mark_survives_clearing_and_reloading_the_month(self):
+        r = self.post("/payments/api/payment/bulk/", {"month": "2026-09", "pIds": [1, 2], "large_family": True})
+        self.assertEqual([(row["pId"], row["large_family"], row["monthly"]) for row in r.json()["rows"]],
+                         [(1, True, 51000), (2, True, 51000)])
+
+        self.post("/payments/api/clear/", {"month": "2026-09"})
+        rows = [{"pId": p_id, "i": iin, "fio": "Ребёнок", "gId": 1, "gn": "Ромашка"}
+                for p_id, iin in ((1, "200101500001"), (2, "210101600002"), (3, "220101500003"))]
+        self.post("/payments/api/receive/", {"month": "2026-09", "result": rows})
+        self.assertEqual(self.monthly(), {1: (51000, True), 2: (51000, True), 3: (60000, False)})
+        # и в новом месяце
+        self.post("/payments/api/receive/", {"month": "2026-10", "result": rows[:1]})
+        self.assertEqual(self.monthly("2026-10"), {1: (51000, True)})
+
+    def test_mark_is_found_by_iin_when_the_id_changes(self):
+        Child.objects.filter(p_id=1).update(large_family=True)
+        record(77, "200101500001", month="2026-10", fio="Иванов Брат")  # в новом табеле другой id
+        self.assertEqual(self.monthly("2026-10"), {77: (51000, True)})
+        # снять отметку можно и под новым id
+        self.post("/payments/api/payment/", {"pId": 77, "month": "2026-10", "large_family": False})
+        self.assertEqual(self.monthly("2026-10"), {77: (60000, False)})
+        self.assertFalse(Child.objects.filter(large_family=True).exists())
 
     def test_own_monthly_sum_overrides_the_default(self):
-        r = self.client.post("/payments/api/payment/", {"pId": 1, "month": "2026-09", "monthly": "45 000"},
-                             content_type="application/json").json()["totals"]
+        Child.objects.filter(p_id=1).update(large_family=True)
+        r = self.post("/payments/api/payment/", {"pId": 1, "month": "2026-09", "monthly": "45 000"}).json()["totals"]
         self.assertEqual((r["monthly"], r["monthly_default"]), (45000, False))
-        r = self.client.post("/payments/api/payment/", {"pId": 1, "month": "2026-09", "monthly": ""},
-                             content_type="application/json").json()["totals"]
+        r = self.post("/payments/api/payment/", {"pId": 1, "month": "2026-09", "monthly": ""}).json()["totals"]
         self.assertEqual((r["monthly"], r["monthly_default"]), (51000, True))
         self.assertIsNone(PaymentInfo.objects.get().monthly_payment)
 
@@ -327,6 +342,15 @@ class NewDefaultsMigrationTests(TransactionTestCase):
         monthly = dict(PaymentInfo_.objects.values_list("child_id", "monthly_payment"))
         self.assertEqual(monthly, {old_untouched.pk: 51000, old_custom.pk: 45000, now_old_default.pk: None})
         self.assertNotIn(now_untouched.pk, monthly)  # по умолчанию: 60 000 или 51 000 многодетной семье
+
+    def test_large_family_becomes_manual_only(self):
+        apps = self.migrate([("payments", "0007_family_payment_method")])
+        Child_ = apps.get_model("payments", "Child")
+        for p_id, value in ((1, None), (2, True), (3, False)):
+            Child_.objects.create(p_id=p_id, fio=f"Ребёнок {p_id}", large_family=value)
+        apps = self.migrate([("payments", "0008_large_family_manual")])
+        marks = dict(apps.get_model("payments", "Child").objects.values_list("p_id", "large_family"))
+        self.assertEqual(marks, {1: False, 2: True, 3: False})
 
 
 class BookmarkletTests(TestCase):

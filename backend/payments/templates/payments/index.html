@@ -183,11 +183,11 @@
         </thead>
         <tbody>
           {% for r in records %}
-          <tr data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}" data-pid="{{ r.pId }}" data-method="{{ r.method }}" data-paid="{{ r.last_payment|unlocalize }}"{% if r.large_family %} data-large{% endif %}>
+          <tr data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}" data-pid="{{ r.pId }}" data-method="{{ r.method }}" data-paid="{{ r.last_payment|unlocalize }}">
             <td class="col-name">
               <div class="name-cell">
                 <input type="checkbox" class="pick" aria-label="Выбрать: {{ r.fio }}">
-                <div><a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ month }}">{{ r.fio }}</a><span class="sub">{{ r.iin }}{% if r.iin and r.age %} · {% endif %}{{ r.age }}{% if r.large_family %} <span class="badge badge-family" title="Многодетная семья: ежемесячная по умолчанию {{ large_family_monthly|floatformat:'0g' }} ₸">многодетная</span>{% endif %}</span></div>
+                <div><a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ month }}">{{ r.fio }}</a><span class="sub">{{ r.iin }}{% if r.iin and r.age %} · {% endif %}{{ r.age }} <span class="badge badge-family" data-cell="large" title="Многодетная семья: ежемесячная по умолчанию {{ large_family_monthly|floatformat:'0g' }} ₸"{% if not r.large_family %} hidden{% endif %}>многодетная</span></span></div>
               </div>
             </td>
             {% if not group %}<td><span class="group-cell" title="{{ r.group }}">{{ r.group }}</span></td>{% endif %}
@@ -220,9 +220,10 @@
       <span><i class="d empty"></i>нет отметки</span>
     </div>
     <p class="hint">
-      Ежемесячная оплата по умолчанию — {{ default_monthly|floatformat:"0g" }} ₸, для многодетной семьи — {{ large_family_monthly|floatformat:"0g" }} ₸
-      (многодетная — если в табеле за месяц есть ещё ребёнок того же родителя). «Наличные» или «Онлайн» без суммы записывают сумму к оплате (Итого),
-      «—» снимает отметку и обнуляет внесённое. Выберите детей галочками, чтобы отметить оплату или изменить ежемесячную сумму сразу у всех.
+      Ежемесячная оплата по умолчанию — {{ default_monthly|floatformat:"0g" }} ₸, для многодетной семьи — {{ large_family_monthly|floatformat:"0g" }} ₸.
+      Многодетных отмечают вручную — в панели выбранных детей или в карточке ребёнка; отметка остаётся после очистки месяца и новой загрузки табеля.
+      «Наличные» или «Онлайн» без суммы записывают сумму к оплате (Итого), «—» снимает отметку и обнуляет внесённое.
+      Выберите детей галочками, чтобы отметить оплату, многодетных или изменить ежемесячную сумму сразу у всех.
     </p>
 
     <div class="bulkbar" id="bulkbar" role="region" aria-label="Действия с выбранными детьми" hidden>
@@ -234,6 +235,11 @@
         <span class="bulk-label" id="bulk-pay-label">Оплата</span>
         {% for value, label in pay_methods %}<button type="button" class="btn" data-bulk-method="{{ value }}">{{ label }}</button>{% endfor %}
         <button type="button" class="btn btn-danger" data-bulk-method="">Снять отметку</button>
+      </div>
+      <div class="bulk-group" role="group" aria-labelledby="bulk-family-label">
+        <span class="bulk-label" id="bulk-family-label">Многодетная</span>
+        <button type="button" class="btn" data-bulk-large="1">Отметить</button>
+        <button type="button" class="btn" data-bulk-large="">Снять</button>
       </div>
       <form class="bulk-group" id="bulk-monthly">
         <label class="bulk-label" for="bulk-monthly-sum">Ежемесячная, ₸</label>
@@ -289,7 +295,7 @@
   if ("BroadcastChannel" in window) new BroadcastChannel("payments").onmessage = () => location.reload();
 
   document.getElementById("clear-month")?.addEventListener("click", async () => {
-    if (!confirm("Удалить табель за {{ month_label }}? Отметки и оплаты, внесённые вручную за этот месяц, тоже удалятся.")) return;
+    if (!confirm("Удалить табель за {{ month_label }}? Отметки и оплаты, внесённые вручную за этот месяц, тоже удалятся. Отметка «многодетная» у детей останется.")) return;
     try {
       await postJSON("{% url 'payments:clear_data' %}", {month: "{{ month }}"});
       location.reload();
@@ -333,7 +339,8 @@
     row.querySelector(".pay-amount").value = Math.round(t.last_payment);
     const monthly = row.querySelector("[data-cell=monthly]");
     monthly.textContent = money(t.monthly);
-    monthly.title = !t.monthly_default ? "Задана вручную" : "large" in row.dataset ? "По умолчанию: многодетная семья" : "По умолчанию";
+    monthly.title = !t.monthly_default ? "Задана вручную" : t.large_family ? "По умолчанию: многодетная семья" : "По умолчанию";
+    row.querySelector("[data-cell=large]").hidden = !t.large_family;
     row.querySelector("[data-cell=total]").textContent = money(t.total);
     const overpay = row.querySelector("[data-cell=overpay]");
     overpay.textContent = money(t.overpay);
@@ -425,6 +432,14 @@
       bulk({method}, (n) => method
         ? `Отметить оплату «${button.textContent}» у ${children(n)} за {{ month_label }}? Где сумма не внесена, запишется сумма к оплате.`
         : `Снять отметку об оплате у ${children(n)} за {{ month_label }}? Внесённые суммы обнулятся.`);
+    });
+  }
+  for (const button of document.querySelectorAll("[data-bulk-large]")) {
+    button.addEventListener("click", () => {
+      const large = Boolean(button.dataset.bulkLarge);
+      bulk({large_family: large}, (n) => large
+        ? `Отметить многодетными ${n === 1 ? "1 ребёнка" : n + " детей"}? Ежемесячная по умолчанию станет {{ large_family_monthly|floatformat:'0g' }} ₸, отметка сохранится и в следующих месяцах.`
+        : `Снять отметку «многодетная» у ${children(n)}? Ежемесячная по умолчанию станет {{ default_monthly|floatformat:'0g' }} ₸.`);
     });
   }
   const monthlyForm = document.getElementById("bulk-monthly");

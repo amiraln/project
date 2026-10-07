@@ -21,7 +21,8 @@ from django.views.decorators.http import require_POST
 
 from .access import admin_api, admin_required
 from .models import (DEFAULT_MONTHLY, LARGE_FAMILY_MONTHLY, ChangeLog, Child, ChildRecord, Families, Guardian,
-                     PaymentInfo, default_monthly, guardian_match, sync_children)
+                     PaymentInfo, default_monthly, guardian_match, large_family_records, set_large_family,
+                     sync_children)
 
 # Расчёт оплаты: отпуск (ОР) вычитается по дням, больничный (БР) — фиксированно, если дней больше порога
 WORK_DAYS = 22
@@ -136,7 +137,7 @@ def calc_due(monthly, vacation_days, sick_days):
 
 def summarize(rec, large_family=False):
     """Строка табеля: отметки по дням, счётчики и расчёт оплаты за месяц.
-    large_family — ребёнок из многодетной семьи (см. Families.large): от этого зависит сумма по умолчанию."""
+    large_family — ребёнок отмечен многодетным (large_family_records): от этого зависит сумма по умолчанию."""
     marks = json.loads(rec.days_json or "{}")
     days = []
     for num in range(1, days_in_month(rec.month) + 1):
@@ -155,7 +156,7 @@ def summarize(rec, large_family=False):
         "group": rec.group_name, "group_id": rec.group_id, "month": rec.month,
         "days": days, "present": sum(d["type"] == "present" for d in days),
         "vacation_days": vacation, "sick_days": sick, "large_family": large_family,
-        "monthly": monthly, "monthly_default": own_monthly is None,
+        "monthly": monthly, "monthly_default": own_monthly is None, "default_monthly": default_monthly(large_family),
         "last_payment": paid, "method": method, "method_label": PAY_METHODS.get(method, ""),
         "total": total, "overpay": round(paid - total, 2),
     }
@@ -173,21 +174,20 @@ def absences(days):
 def child_totals(rec, large_family):
     """Итоги месяца и оплата ребёнка — отдаются страницам после каждого изменения."""
     s = summarize(rec, large_family)
-    keys = ("present", "vacation_days", "sick_days", "monthly", "monthly_default", "last_payment", "method",
-            "total", "overpay")
+    keys = ("present", "vacation_days", "sick_days", "large_family", "monthly", "monthly_default", "default_monthly",
+            "last_payment", "method", "total", "overpay")
     return {**{key: s[key] for key in keys}, "absences": absences(s["days"])}
 
 
-def is_large_family(rec, families=None):
-    """Из многодетной ли семьи ребёнок в месяце этой строки табеля."""
-    month = ChildRecord.objects.filter(month=rec.month).only("p_id", "iin", "month")
-    return (rec.month, rec.p_id) in (families or Families()).large(month)
+def is_large_family(rec):
+    """Отмечен ли ребёнок из этой строки табеля многодетным."""
+    return bool(large_family_records([rec]))
 
 
-def balances(families=None):
+def balances():
     """Внесено и начислено по каждому ребёнку за все месяцы; самый большой долг — первым."""
     records = list(ChildRecord.objects.select_related("payment").order_by("month"))
-    large = (families or Families()).large(records)
+    large = large_family_records(records)
     children = {}
     for rec in records:
         s = summarize(rec, (rec.month, rec.p_id) in large)
@@ -210,7 +210,7 @@ def balances(families=None):
 def index(request):
     month, months = resolve_month(request)
     records = list(ChildRecord.objects.filter(month=month).select_related("payment"))
-    large = Families().large(records)  # по всему месяцу: брат или сестра бывают в другой группе
+    large = large_family_records(records)
 
     counts = Counter((r.group_id, r.group_name) for r in records)
     groups = sorted(({"gid": str(gid), "name": name, "count": n} for (gid, name), n in counts.items()),
@@ -247,14 +247,13 @@ def child_detail(request, p_id):
     rec = ChildRecord.objects.filter(p_id=p_id, month=month).select_related("payment").first()
     context = {"month": month, "month_label": month_label(month)}
     if rec:
-        families = Families()
-        child = summarize(rec, is_large_family(rec, families))
+        child = summarize(rec, is_large_family(rec))
         context.update({
             "child": child,
             "pupil": Child.objects.filter(p_id=rec.p_id).first(),  # адрес и договор из e-orda
-            "siblings": families.siblings(rec.p_id, rec.iin),
+            "siblings": Families().siblings(rec.p_id, rec.iin),
             "pay_methods": PaymentInfo.METHODS,
-            "default_monthly": default_monthly(child["large_family"]),
+            "large_family_monthly": LARGE_FAMILY_MONTHLY,
             "absences": absences(child["days"]),
             "blank_days": range(date(int(month[:4]), int(month[5:7]), 1).weekday()),  # пустые клетки до 1-го числа
             "guardians": Guardian.objects.filter(guardian_match(rec.p_id, rec.iin)),
@@ -300,7 +299,7 @@ def parents_page(request):
         if g.child_iin:
             by_iin[g.child_iin].append(g)
     families = Families()
-    rows = balances(families)
+    rows = balances()
     for row in rows:
         found = by_pid[row["pId"]] + (by_iin[row["iin"]] if row["iin"] else [])
         row["guardians"] = list({g.pk: g for g in found}.values())
@@ -387,12 +386,22 @@ def payment_changes(data):
         if not isinstance(data["method"], str) or data["method"] not in ("", *PAY_METHODS):
             raise ValueError("Способ оплаты — наличные или онлайн")
         changes["method"] = data["method"]
+    if "large_family" in data:
+        if not isinstance(data["large_family"], bool):
+            raise ValueError("Многодетная семья — да или нет")
+        changes["large_family"] = data["large_family"]
     return changes
 
 
 def apply_payment(rec, changes, large_family):
-    """Сохранить оплату за месяц. Оплата, отмеченная без суммы, — на всю сумму к оплате;
-    снятая отметка — оплаты нет; оплата 0 — без способа."""
+    """Сохранить оплату за месяц и отметку «многодетная» (она — у воспитанника, на все месяцы).
+    Оплата, отмеченная без суммы, — на всю сумму к оплате; снятая отметка — оплаты нет; оплата 0 — без способа.
+    Возвращает, многодетный ли ребёнок после изменений."""
+    if "large_family" in changes:
+        large_family = changes["large_family"]
+        set_large_family(rec, large_family)
+    if changes.keys() <= {"large_family"}:
+        return large_family
     pay = getattr(rec, "payment", None) or PaymentInfo(child=rec)
     rec.payment = pay
     if "monthly" in changes:
@@ -408,6 +417,7 @@ def apply_payment(rec, changes, large_family):
         elif not pay.last_payment:
             pay.last_payment = max(0, summarize(rec, large_family)["total"])
     pay.save()
+    return large_family
 
 
 @require_POST
@@ -421,15 +431,14 @@ def save_payment(request):
         changes = payment_changes(data)
     except ValueError as e:
         return error(str(e))
-    large = is_large_family(rec)
-    apply_payment(rec, changes, large)
+    large = apply_payment(rec, changes, is_large_family(rec))
     return JsonResponse({"ok": True, "totals": child_totals(rec, large)})
 
 
 @require_POST
 @admin_api
 def bulk_payment(request):
-    """Оплата или ежемесячная сумма сразу у нескольких детей за месяц."""
+    """Оплата, ежемесячная сумма или отметка «многодетная» сразу у нескольких детей за месяц."""
     data = load_json(request)
     month, p_ids = data.get("month"), data.get("pIds")
     if not is_month(month) or not isinstance(p_ids, list) or not p_ids:
@@ -446,15 +455,14 @@ def bulk_payment(request):
             ids.add(int(p_id))
         except (TypeError, ValueError):
             return error("Не выбраны дети")
-    month_records = list(ChildRecord.objects.filter(month=month).select_related("payment"))
-    large = Families().large(month_records)
-    records = [rec for rec in month_records if rec.p_id in ids]
+    records = list(ChildRecord.objects.filter(month=month, p_id__in=ids).select_related("payment"))
+    large = large_family_records(records)
+    rows = []
     with transaction.atomic():
         for rec in records:
-            apply_payment(rec, changes, (month, rec.p_id) in large)
-    return JsonResponse({"ok": True, "rows": [
-        {"pId": rec.p_id, **child_totals(rec, (month, rec.p_id) in large)} for rec in records
-    ]})
+            now_large = apply_payment(rec, changes, (month, rec.p_id) in large)
+            rows.append({"pId": rec.p_id, **child_totals(rec, now_large)})
+    return JsonResponse({"ok": True, "rows": rows})
 
 
 @require_POST
