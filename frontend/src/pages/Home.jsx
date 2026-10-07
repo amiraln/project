@@ -1,16 +1,16 @@
 import { Link } from "react-router-dom";
-import logo from "../assets/logo.webp";
 import { useSite } from "../context.jsx";
 import { useApi, useSiteName, useTitle } from "../hooks.js";
 import { useLang } from "../i18n.jsx";
+import SeasonScene from "../components/SeasonScene.jsx";
 import { Async, telHref } from "../components/ui.jsx";
+import Appeals from "./Appeals.jsx";
 import { NewsItem } from "./News.jsx";
+import { Parents } from "./Sections.jsx";
 
 const QUICK_LINKS = [
   ["nutrition", "quickMenu"],
   ["education", "quickSchedule"],
-  ["parents", "quickAdmission"],
-  ["appeals", "quickAppeal"],
 ];
 
 /* Открыт ли детский сад сейчас — по времени Алматы, а не по часовому поясу посетителя */
@@ -87,19 +87,21 @@ export default function Home() {
           {tr(site, "tagline") && <p className="hero-tagline">{tr(site, "tagline")}</p>}
           <Today />
         </div>
-        <img src={logo} alt="" className="hero-logo" width="640" height="640" fetchpriority="high" />
+        {/* Картинка и анимация меняются по текущему времени года */}
+        <SeasonScene className="hero-art" />
       </section>
 
-      <section className="home-quick" aria-labelledby="quick-title">
-        <h2 id="quick-title">{t("forParentsQuick")}</h2>
-        <ul className="quick-list">
+      {/* «Родителям» и «Обращения» — не в меню, а здесь, целыми разделами (те же, что на /parents и /appeals) */}
+      <Parents embedded>
+        <ul className="quick-list" aria-label={t("forParentsQuick")}>
           {QUICK_LINKS.map(([to, key]) => (
             <li key={key}>
               <Link to={path(to)}>{t(key)}</Link>
             </li>
           ))}
         </ul>
-      </section>
+      </Parents>
+      <Appeals embedded />
 
       <section className="home-news" aria-labelledby="news-title">
         <div className="section-head">

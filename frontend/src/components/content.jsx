@@ -16,17 +16,19 @@ function initials(fullName) {
     .join("");
 }
 
-export function DocumentList({ categories }) {
+/* hideEmpty — когда документов нет, ничего не показывать (раздел на главной) */
+export function DocumentList({ categories, headingLevel = 2, hideEmpty = false }) {
   const { t, tr, fmtDate } = useLang();
+  const H = `h${headingLevel}`;
   const state = useApi(`/documents/?category=${categories.join(",")}`);
   return (
     <Async state={state}>
       {(docs) => {
         const byCat = categories.map((c) => [c, docs.filter((d) => d.category === c)]).filter(([, list]) => list.length);
-        if (!byCat.length) return <p className="muted">{t("noDocuments")}</p>;
+        if (!byCat.length) return hideEmpty ? null : <p className="muted">{t("noDocuments")}</p>;
         return byCat.map(([cat, list]) => (
           <section key={cat} className="doc-section" aria-labelledby={`doc-${cat}`}>
-            <h2 id={`doc-${cat}`}>{t(`cat_${cat}`)}</h2>
+            <H id={`doc-${cat}`}>{t(`cat_${cat}`)}</H>
             <ul className="doc-list">
               {list.map((d) => {
                 const type = d.extension?.toUpperCase();
@@ -60,13 +62,14 @@ export function DocumentList({ categories }) {
   );
 }
 
-export function FAQList({ section }) {
+export function FAQList({ section, headingLevel = 2 }) {
   const { t, tr } = useLang();
+  const H = `h${headingLevel}`;
   const { data } = useApi(`/faq/?section=${section}`);
   if (!data?.length) return null;
   return (
     <section className="faq" aria-labelledby={`faq-${section}`}>
-      <h2 id={`faq-${section}`}>{t("faq")}</h2>
+      <H id={`faq-${section}`}>{t("faq")}</H>
       {data.map((q) => (
         <details key={q.id} className="faq-item">
           <summary>{tr(q, "question")}</summary>
@@ -123,29 +126,46 @@ export function PeopleList({ kind }) {
   );
 }
 
-/* Общий шаблон раздела: заголовок + текст из админки + документы + вопросы + доп. содержимое */
-export function SectionPage({ slug, docs, faq, children }) {
+/* Общий шаблон раздела: заголовок + текст из админки + документы + вопросы + доп. содержимое.
+   embedded — раздел на главной: заголовок h2 вместо h1, подзаголовки на уровень ниже (h3) */
+export function SectionPage({ slug, docs, faq, embedded = false, children }) {
   const { t, tr, fmtDate } = useLang();
   const { data: page } = useApi(`/pages/${slug}/`); // раздел ещё не заполнен — просто нет текста
   const body = tr(page, "body");
-  useTitle(t(slug));
-  return (
-    <article aria-labelledby="page-title">
-      <PageHeader title={t(slug)}>
-        {body && (
-          <p className="muted small">
-            {t("updated")}: {fmtDate(page.updated_at)}
-          </p>
-        )}
-      </PageHeader>
+  const level = embedded ? 3 : 2;
+  useTitle(embedded ? null : t(slug));
+  const updated = body && (
+    <p className="muted small">
+      {t("updated")}: {fmtDate(page.updated_at)}
+    </p>
+  );
+  const content = (
+    <>
       <RichText html={body} />
       {children}
       {docs && (
         <section className="section-block" aria-label={t("documents")}>
-          <DocumentList categories={docs} />
+          <DocumentList categories={docs} headingLevel={level} hideEmpty={embedded} />
         </section>
       )}
-      {faq && <FAQList section={faq} />}
+      {faq && <FAQList section={faq} headingLevel={level} />}
+    </>
+  );
+  if (embedded) {
+    return (
+      <section id={slug} className="home-section" aria-labelledby={`${slug}-title`}>
+        <header className="home-section-head">
+          <h2 id={`${slug}-title`}>{t(slug)}</h2>
+          {updated}
+        </header>
+        {content}
+      </section>
+    );
+  }
+  return (
+    <article aria-labelledby="page-title">
+      <PageHeader title={t(slug)}>{updated}</PageHeader>
+      {content}
     </article>
   );
 }

@@ -1,0 +1,201 @@
+/* Раздел «Документы для зачисления». Все классы начинаются с .pd-, чтобы не пересекаться со стилями сайта.
+   Шрифт — тот же Nunito, что и на всём сайте (подключён в main.jsx). */
+.pd {
+  --pd-ink: #3a2412;
+  --pd-muted: #6e5846;
+  --pd-line: #eee2cf;
+  --pd-card: #fff;
+  --pd-orange-soft: #fff2e0;
+  --pd-orange-deep: #a3520c;
+  --pd-sky: #2a6fae;
+  --pd-sky-soft: #e4f0fb;
+  --pd-sky-text: #1f5c94;
+
+  color: var(--pd-ink);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.pd *,
+.pd *::before,
+.pd *::after { box-sizing: border-box; }
+.pd :where(p, h2, h3, h4) { margin: 0; color: inherit; }
+
+/* ---------- Шапка: заголовок и пояснение (картинка по времени года — в SeasonScene) ---------- */
+.pd-hero {
+  padding: 32px 36px;
+  border: 1.5px solid var(--pd-line);
+  border-radius: 28px;
+  background: var(--pd-card);
+}
+.pd-hero__title {
+  font-size: clamp(1.6rem, 1.05rem + 2.2vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.pd-hero__lead {
+  max-width: 32em;
+  margin-top: 14px;
+  color: var(--pd-muted);
+  font-size: 1.08rem;
+}
+/* ---------- Группы документов ---------- */
+.pd-group { margin-top: 44px; }
+.pd-group__head { margin: 0 6px 14px; }
+.pd-group__title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.pd-group__note {
+  margin-top: 4px;
+  color: var(--pd-muted);
+}
+
+.pd-list {
+  margin: 0;
+  padding: 4px 24px;
+  list-style: none;
+  background: var(--pd-card);
+  border: 1.5px solid var(--pd-line);
+  border-radius: 22px;
+}
+.pd-item {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  align-items: start;
+  gap: 18px;
+  padding: 20px 0;
+}
+.pd-item + .pd-item { border-top: 2px dashed var(--pd-line); }
+
+.pd-item__tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 17px;
+  background: var(--pd-orange-soft);
+  color: var(--pd-orange-deep);
+}
+.pd-item__tile .pd-icon { width: 26px; height: 26px; }
+.pd-item__num {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: 2px solid var(--pd-card);
+  border-radius: 999px;
+  background: var(--pd-sky);
+  color: var(--pd-card);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.pd-item--key .pd-item__tile {
+  background: var(--pd-sky-soft);
+  color: var(--pd-sky);
+}
+
+.pd-item__body { padding-top: 3px; min-width: 0; }
+.pd-item__title {
+  font-size: 1.08rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.pd-item__sub {
+  margin-top: 6px;
+  color: var(--pd-muted);
+  font-size: 0.97rem;
+}
+
+.pd-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 9px;
+  border-radius: 8px;
+  background: var(--pd-orange-soft);
+  color: var(--pd-orange-deep);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: 2px;
+}
+
+.pd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 5px 13px 5px 9px;
+  border-radius: 999px;
+  background: var(--pd-sky-soft);
+  color: var(--pd-sky-text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.pd-badge .pd-icon { flex: none; width: 18px; height: 18px; }
+
+.pd-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 36px;
+  padding: 18px 22px;
+  border-radius: 20px;
+  background: var(--pd-orange-soft);
+  font-weight: 700;
+}
+.pd-footer .pd-icon { flex: none; width: 26px; height: 26px; color: var(--pd-orange-deep); }
+
+.pd-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- Телефоны ---------- */
+@media (max-width: 640px) {
+  .pd-hero {
+    padding: 26px 20px 30px;
+    border-radius: 22px;
+  }
+
+  .pd-group { margin-top: 34px; }
+  .pd-group__head { margin: 0 2px 12px; }
+  .pd-list { padding: 2px 16px; border-radius: 18px; }
+  .pd-item { grid-template-columns: 46px 1fr; gap: 14px; padding: 18px 0; }
+  .pd-item__tile { width: 46px; height: 46px; border-radius: 14px; }
+  .pd-item__tile .pd-icon { width: 23px; height: 23px; }
+  .pd-tag { display: block; width: fit-content; margin: 6px 0 0; }
+  .pd-footer { padding: 16px 18px; }
+}
+
+/* ---------- Версия для слабовидящих ---------- */
+/* Контрастные схемы: цвета раздела берутся из схемы сайта, мягкие заливки заменяются рамками */
+html[data-scheme] .pd {
+  --pd-ink: var(--ink);
+  --pd-muted: var(--ink);
+  --pd-line: var(--ink);
+  --pd-card: var(--paper);
+  --pd-orange-soft: var(--paper);
+  --pd-orange-deep: var(--ink);
+  --pd-sky: var(--ink);
+  --pd-sky-soft: var(--paper);
+  --pd-sky-text: var(--ink);
+}
+html[data-scheme] .pd-item__tile,
+html[data-scheme] .pd-tag,
+html[data-scheme] .pd-badge,
+html[data-scheme] .pd-footer { border: 2px solid var(--ink); }

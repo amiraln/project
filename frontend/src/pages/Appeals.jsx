@@ -8,8 +8,9 @@ import { SectionPage } from "../components/content.jsx";
 const EMPTY = { full_name: "", contact: "", subject: "", message: "", consent: false, website: "" };
 const REQUIRED = ["full_name", "contact", "subject", "message"];
 
-function AppealForm() {
+function AppealForm({ headingLevel = 2 }) {
   const { t, lang } = useLang();
+  const H = `h${headingLevel}`;
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
   const [state, setState] = useState("idle"); // idle | sending | sent | error | throttled
@@ -64,7 +65,7 @@ function AppealForm() {
 
   return (
     <form className="form" onSubmit={submit} noValidate aria-labelledby="appeal-title">
-      <h2 id="appeal-title">{t("writeAppeal")}</h2>
+      <H id="appeal-title">{t("writeAppeal")}</H>
       <div aria-live="polite">
         {state === "sent" && <p className="notice notice-ok">{t("appealSent")}</p>}
         {state === "error" && <p className="notice notice-error">{t("appealError")}</p>}
@@ -91,13 +92,15 @@ function AppealForm() {
   );
 }
 
-export default function Appeals() {
+/* Раздел «Обращения» — отдельной страницей и на главной (embedded) */
+export default function Appeals({ embedded = false }) {
   const { t, tr } = useLang();
   const site = useSite();
+  const level = embedded ? 3 : 2;
   return (
-    <SectionPage slug="appeals" faq="appeals">
-      <TextSection id="reception" title={t("receptionSchedule")} html={tr(site, "reception")} />
-      <AppealForm />
+    <SectionPage slug="appeals" faq="appeals" embedded={embedded}>
+      <TextSection id="reception" title={t("receptionSchedule")} html={tr(site, "reception")} headingLevel={level} />
+      <AppealForm headingLevel={level} />
     </SectionPage>
   );
 }

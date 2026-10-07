@@ -3,6 +3,7 @@ import { useApi } from "../hooks.js";
 import { useLang } from "../i18n.jsx";
 import { Async, RichText, TextSection } from "../components/ui.jsx";
 import { PeopleList, SectionPage } from "../components/content.jsx";
+import ParentsDocuments from "../components/ParentsDocuments.jsx";
 
 export function About() {
   const { t, tr } = useLang();
@@ -57,7 +58,16 @@ export const Teachers = () => (
 
 export const Documents = () => <SectionPage slug="documents" docs={["charter", "gos", "rules", "program", "other"]} />;
 export const Education = () => <SectionPage slug="education" docs={["program", "schedule"]} />;
-export const Parents = () => <SectionPage slug="parents" docs={["admission", "contract", "payment"]} faq="parents" />;
+/* Раздел «Родителям» — отдельной страницей и на главной (embedded); children — доп. содержимое главной */
+export function Parents({ embedded = false, children }) {
+  const { lang } = useLang();
+  return (
+    <SectionPage slug="parents" docs={["admission", "contract", "payment"]} faq="parents" embedded={embedded}>
+      {children}
+      <ParentsDocuments lang={lang} headingLevel={embedded ? 3 : 2} />
+    </SectionPage>
+  );
+}
 export const Nutrition = () => <SectionPage slug="nutrition" docs={["menu", "nutrition"]} />;
 export const Finance = () => <SectionPage slug="finance" docs={["report", "budget", "procurement"]} />;
 

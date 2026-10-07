@@ -130,6 +130,7 @@ main { padding-block: 2.5rem 4rem; min-height: 60vh; }
 .prose th, .prose td { border: 1px solid var(--line); padding: 0.5rem 0.75rem; text-align: left; }
 .prose blockquote { margin: 1.5em 0; padding-left: 1rem; border-left: 4px solid var(--sun); }
 .section-block { margin-top: 2.5rem; }
+.section-block:empty { display: none; }
 
 /* ===== Главная ===== */
 .hero { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 2.5rem; align-items: end; padding-bottom: 3rem; border-bottom: 1px solid var(--line); }
@@ -143,7 +144,8 @@ main { padding-block: 2.5rem 4rem; min-height: 60vh; }
   overflow-wrap: anywhere;
 }
 .hero-tagline { font-size: 1.3125rem; max-width: 34ch; color: var(--ink); margin: 0; }
-.hero-logo { width: 100%; max-width: 22rem; height: auto; justify-self: end; align-self: center; }
+.hero-art { width: 100%; max-width: 26rem; justify-self: end; align-self: center; }
+html[data-images="off"] .hero { grid-template-columns: 1fr; }
 .today { max-width: 30rem; margin-top: 1.75rem; background: var(--mist); border-radius: var(--r-l); padding: 1.5rem; border-left: 8px solid var(--sun); }
 .today-status { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; font-size: 1.1875rem; margin-bottom: 1rem; }
 .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--ink-soft); flex: none; }
@@ -155,10 +157,16 @@ main { padding-block: 2.5rem 4rem; min-height: 60vh; }
 .today-phone { font-size: 1.375rem; font-weight: 850; color: var(--ink); text-decoration: none; white-space: nowrap; }
 @media (max-width: 52rem) {
   .hero { grid-template-columns: 1fr; gap: 1.5rem; }
-  .hero-logo { max-width: 16rem; justify-self: center; }
+  .hero-art { max-width: 19rem; justify-self: center; }
 }
 
-.home-quick h2, .home-news h2 { margin-top: 2.5rem; }
+/* Разделы «Родителям» и «Обращения» на главной — заголовок как у отдельной страницы раздела */
+.home-section { margin-top: 3.5rem; }
+.home-section-head { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 3px solid var(--sun); }
+.home-section-head h2 { margin: 0; font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.25rem); font-weight: 850; }
+.home-section-head p { margin: 0.35rem 0 0; }
+.prose + .pd, .quick-list + .pd { margin-top: 2.5rem; }
+.home-news h2 { margin-top: 2.5rem; }
 .quick-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); border-top: 1px solid var(--line); }
 .quick-list li { border-bottom: 1px solid var(--line); }
 .quick-list a { display: block; padding: 1rem 0.25rem; font-size: 1.125rem; font-weight: 750; color: var(--ink); text-decoration: none; }
@@ -188,7 +196,7 @@ main { padding-block: 2.5rem 4rem; min-height: 60vh; }
 .gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; }
 
 /* ===== Документы ===== */
-.doc-section h2 { font-size: 1.25rem; }
+.doc-section h2, .doc-section h3 { font-size: 1.25rem; }
 .doc-list { list-style: none; margin: 0; padding: 0; max-width: 52rem; }
 .doc-item { display: flex; gap: 1rem; align-items: flex-start; padding-block: 0.9rem; border-bottom: 1px solid var(--line); }
 .doc-ext { flex: none; min-width: 3.25rem; text-align: center; padding: 0.35rem 0.4rem; border: 2px solid var(--steppe); border-radius: var(--r-s); color: var(--steppe); font-weight: 850; font-size: 0.8125rem; }

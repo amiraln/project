@@ -6,11 +6,11 @@ import { LANGS, useLang } from "../i18n.jsx";
 import A11yPanel from "./A11yPanel.jsx";
 import { telHref } from "./ui.jsx";
 
+// «Родителям» и «Обращения» — не в меню, а на главной странице (см. pages/Home.jsx)
 const NAV = [
   { key: "home", to: "" },
   { key: "groupKindergarten", items: ["about", "leadership", "teachers", "documents", "finance", "vacancies"] },
   { key: "groupLearning", items: ["education", "nutrition"] },
-  { key: "groupParents", items: ["parents", "appeals"] },
   { key: "news", to: "news" },
   { key: "contacts", to: "contacts" },
 ];

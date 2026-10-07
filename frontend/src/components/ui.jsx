@@ -17,11 +17,12 @@ export function RichText({ html }) {
 }
 
 /* Раздел страницы с заголовком и текстом из админки; пустой текст — раздел не показываем */
-export function TextSection({ id, title, html }) {
+export function TextSection({ id, title, html, headingLevel = 2 }) {
+  const H = `h${headingLevel}`;
   if (!html) return null;
   return (
     <section className="section-block" aria-labelledby={id}>
-      <h2 id={id}>{title}</h2>
+      <H id={id}>{title}</H>
       <RichText html={html} />
     </section>
   );

@@ -1,0 +1,55 @@
+/* Картинка по времени года: верблюжонок с мамой, сверху летят снег, лепестки, бабочки или дождь.
+   Слой с полётом на четверть больше картинки (SVG 800×800, картинка в нём — 640×640 по центру),
+   поэтому картинка стоит с отступом 10% внутри квадрата, а полёт занимает весь квадрат и не вылезает за него. */
+.season {
+  position: relative;
+  aspect-ratio: 1;
+}
+.season-scene {
+  position: absolute;
+  inset: 10%;
+}
+/* Все слои одного размера и лежат друг на друге */
+.season .season-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* Мама покачивает головой и наклоняется к малышу; точка поворота — на шее */
+.season-mom {
+  transform-origin: 64.7% 56.9%;
+  animation: season-mom 8s ease-in-out infinite;
+}
+/* Малыш поднимает голову к маме и снова кладёт её на ножки */
+.season-calf {
+  transform-origin: 36.7% 78.1%;
+  animation: season-calf 8s ease-in-out infinite;
+}
+@keyframes season-mom {
+  0%, 100% { transform: rotate(0deg); }
+  18% { transform: rotate(1.6deg); }
+  38% { transform: rotate(-1deg); }
+  54%, 72% { transform: rotate(-3deg); }
+  88% { transform: rotate(0.8deg); }
+}
+@keyframes season-calf {
+  0%, 30%, 92%, 100% { transform: rotate(0deg) translateY(0); }
+  50%, 74% { transform: rotate(-7deg) translateY(-0.5%); }
+}
+
+.season-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.season-overlay img { width: 100%; height: 100%; }
+
+/* Если в системе включено «уменьшить движение» — верблюжата не двигаются, снег и дождь замирают. */
+@media (prefers-reduced-motion: reduce) {
+  .season-mom,
+  .season-calf { animation: none; }
+}
+
+/* Версия для слабовидящих, «Изображения: скрыть» — убираем картинку целиком, чтобы не оставалось пустого квадрата */
+html[data-images="off"] .season { display: none; }
