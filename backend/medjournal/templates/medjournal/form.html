@@ -1,0 +1,114 @@
+{% extends "medjournal/base.html" %}
+{% block title %}{{ journal.title }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <a class="btn" href="{% url 'medjournal:list' journal.slug %}">← {{ journal.number }}. {{ journal.title|truncatechars:60 }}</a>
+  <h2>{% if object %}Изменить запись{% else %}Новая запись{% endif %}</h2>
+</div>
+
+<form method="post" class="card section" id="record-form">
+  {% csrf_token %}
+  {% if autofill %}<p class="muted small" style="margin-bottom:14px">После выбора ребёнка {% for l in autofill.labels %}«{{ l }}»{% if not forloop.last %}, {% endif %}{% endfor %} заполнятся из e-orda (закладка «Родители» в табеле). Исправленное вручную не перезаписывается.</p>{% endif %}
+  {% if form.errors %}<ul class="messages"><li class="error">Проверьте отмеченные поля.</li></ul>{% endif %}
+  {% if form.non_field_errors %}<ul class="errorlist">{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+  <div class="form-grid">
+  {% for field in form %}
+    {% if field.widget_type == "checkbox" %}
+      <label class="field check-field">{{ field }} {{ field.label }}{{ field.errors }}</label>
+    {% else %}
+      <div class="field">{{ field.label_tag }} {{ field }}{% if field.help_text %}<small class="muted small">{{ field.help_text }}</small>{% endif %} {{ field.errors }}</div>
+    {% endif %}
+  {% endfor %}
+  </div>
+
+  {% if period %}
+  <fieldset class="period" id="period" data-date-field="{{ journal.date_field }}">
+    <legend>Заполнить период</legend>
+    <p class="muted small">Те же данные сохранятся отдельной записью на каждый день — с даты записи по последний день включительно. Не нужно — оставьте поле пустым.</p>
+    <div class="period-row">
+      <div class="field">{{ period.until.label_tag }} {{ period.until }} {{ period.until.errors }}</div>
+      <label class="field check-field">{{ period.skip_weekends }} {{ period.skip_weekends.label }}{{ period.skip_weekends.errors }}</label>
+      <span class="period-count" id="period-count" aria-live="polite"></span>
+    </div>
+  </fieldset>
+  {% endif %}
+
+  {% for inl, fs in formsets %}
+    <h3 class="section-title" style="margin-top:26px">{{ inl.title }}</h3>
+    {{ fs.management_form }}
+    {% if fs.non_form_errors %}<ul class="errorlist">{% for e in fs.non_form_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+    <div class="card table-card">
+    <table class="data inline-table">
+      <thead><tr>{% for f in fs.empty_form.visible_fields %}<th>{{ f.label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for f in fs.forms %}
+        <tr>
+          {% for h in f.hidden_fields %}{{ h }}{% endfor %}
+          {% for field in f.visible_fields %}<td>{{ field }}{{ field.errors }}</td>{% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="muted small" style="margin-top:8px">Пустые строки не сохраняются. Нужно больше строк — сохраните и откройте запись снова.</p>
+  {% endfor %}
+
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Сохранить</button>
+    {% if not object %}<button class="btn" type="submit" name="save_add">Сохранить и добавить ещё</button>{% endif %}
+    <a class="btn" href="{% url 'medjournal:list' journal.slug %}">Отмена</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+{% if period %}
+<script>
+  // «Заполнить период»: сколько записей будет создано
+  (() => {
+    const box = document.getElementById("period");
+    const form = document.getElementById("record-form");
+    const start = form.elements[box.dataset.dateField];
+    const until = form.elements["period-until"];
+    const skip = form.elements["period-skip_weekends"];
+    const count = document.getElementById("period-count");
+    const update = () => {
+      const from = start.value.slice(0, 10);  // у даты со временем — только дата
+      if (!from || !until.value) return (count.textContent = "");
+      if (until.value < from) return (count.textContent = "Последний день раньше даты записи");
+      let records = 0;
+      const day = new Date(from + "T00:00:00Z");
+      for (let n = 0; n < 400 && day <= new Date(until.value + "T00:00:00Z"); n++, day.setUTCDate(day.getUTCDate() + 1)) {
+        if (!(skip.checked && [0, 6].includes(day.getUTCDay()))) records++;
+      }
+      count.textContent = `Будет создано записей: ${records}`;
+    };
+    for (const el of [start, until, skip]) for (const type of ["input", "change"]) el.addEventListener(type, update);
+    update();
+  })();
+</script>
+{% endif %}
+{% if autofill %}
+{{ autofill|json_script:"autofill-data" }}
+<script>
+  // Новая запись: после выбора ребёнка подставляем его данные из e-orda. Поле, исправленное вручную, не трогаем.
+  const AUTOFILL = JSON.parse(document.getElementById("autofill-data").textContent);
+  const recordForm = document.getElementById("record-form");
+  const childSelect = recordForm.elements[AUTOFILL.child];
+  const autoInputs = AUTOFILL.fields.map((name) => recordForm.elements[name]);
+  const factsOf = (childId) => AUTOFILL.facts[childId] || {};
+
+  // подставленное сервером («Добавить запись» в журнале, отфильтрованном по ребёнку) тоже считается автоматическим
+  for (const input of autoInputs) {
+    if (input.value && input.value === factsOf(childSelect.value)[input.name]) input.dataset.auto = input.value;
+  }
+  childSelect.addEventListener("change", () => {
+    const facts = factsOf(childSelect.value);
+    for (const input of autoInputs) {
+      if (input.value !== "" && input.value !== input.dataset.auto) continue;
+      input.value = input.dataset.auto = facts[input.name] || "";
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

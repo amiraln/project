@@ -1,0 +1,119 @@
+{% extends "medjournal/base.html" %}
+{% block title %}{{ journal.title }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <a class="btn" href="{% url 'medjournal:index' %}">← Все журналы</a>
+  <h2>{{ journal.number }}. {{ journal.title }}</h2>
+</div>
+
+{% if group_tabs %}
+<nav class="group-tabs" aria-label="Группы">
+  {% for tab in group_tabs %}<a class="group-tab{% if filters.group == tab.value %} active{% endif %}" href="?{{ tab.query }}"{% if filters.group == tab.value %} aria-current="page"{% endif %}>{{ tab.label }} <span class="n">{{ tab.count }}</span></a>{% endfor %}
+</nav>
+{% endif %}
+
+<form method="get" class="toolbar filters">
+  {% if filters.group %}<input type="hidden" name="group" value="{{ filters.group }}">{% endif %}
+  {% if journal.date_field %}
+    <label class="field"><span>С</span><input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+    <label class="field"><span>По</span><input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+  {% endif %}
+  {% if children is not None %}
+    <label class="field field-wide"><span>Ребёнок</span>
+      <select name="child"><option value="">Все дети</option>
+        {% for group, kids in children %}<optgroup label="{{ group }}">{% for c in kids %}<option value="{{ c.pk }}"{% if filters.child == c.pk|stringformat:"s" %} selected{% endif %}>{{ c }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+    </label>
+  {% endif %}
+  {% if journal.date_field or children is not None %}<button class="btn" type="submit">Показать</button>{% endif %}
+  <div class="toolbar-end">
+    <a class="btn" href="{% url 'medjournal:print' journal.slug %}?{{ query }}" target="_blank">Печать</a>
+    <a class="btn" href="{% url 'medjournal:word' journal.slug %}?{{ query }}">Скачать Word</a>
+    {% if can_fill_all %}<a class="btn" href="{% url 'medjournal:fill_all' journal.slug %}">Заполнить всех</a>{% endif %}
+    {% if can_add %}<a class="btn btn-primary" href="{% url 'medjournal:add' journal.slug %}{% if filters.child %}?child={{ filters.child }}{% endif %}">+ Добавить запись</a>{% endif %}
+  </div>
+</form>
+
+<form method="post" action="{% url 'medjournal:bulk' journal.slug %}" id="bulk-form">
+  {% csrf_token %}
+  <input type="hidden" name="query" value="{{ query }}">
+  <input type="hidden" name="all" value="">
+  {% if can_bulk and rows %}
+  <div class="bulk-bar">
+    <span id="bulk-count" aria-live="polite"></span>
+    {% if page.paginator.count > rows|length %}<button type="button" class="btn" id="bulk-all" hidden>Отметить все записи{% if filters.date_from or filters.date_to or filters.group or filters.child %} по фильтру{% endif %}: {{ page.paginator.count }}</button>{% endif %}
+    <div class="toolbar-end">
+      {% if can_change %}<button class="btn" name="action" value="edit" disabled>Изменить отмеченные</button>{% endif %}
+      {% if can_delete %}<button class="btn btn-danger" name="action" value="delete" disabled>Удалить отмеченные</button>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card table-card">
+  <table class="data">
+    <thead><tr>
+      {% if can_bulk %}<th class="pick"><input type="checkbox" id="bulk-page" aria-label="Отметить все записи на странице"></th>{% endif %}
+      <th>№</th>{% for h in headers %}<th>{{ h }}</th>{% endfor %}<th><span class="visually-hidden">Действия</span></th>
+    </tr></thead>
+    <tbody>
+    {% for obj, cells in rows %}
+      <tr>
+        {% if can_bulk %}<td class="pick"><input type="checkbox" name="ids" value="{{ obj.pk }}" aria-label="Отметить запись {{ page.start_index|add:forloop.counter0 }}"></td>{% endif %}
+        <td class="muted">{{ page.start_index|add:forloop.counter0 }}</td>
+        {% for c in cells %}<td>{{ c|linebreaksbr }}</td>{% endfor %}
+        <td class="actions">
+          {% if can_change %}<a href="{% url 'medjournal:edit' journal.slug obj.pk %}">изменить</a>{% endif %}
+          {% if journal.inlines %} · <a href="{% url 'medjournal:record_print' journal.slug obj.pk %}" target="_blank">печать</a> · <a href="{% url 'medjournal:record_word' journal.slug obj.pk %}">word</a>{% endif %}
+          {% if can_delete %} · <a class="danger" href="{% url 'medjournal:delete' journal.slug obj.pk %}">удалить</a>{% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{{ headers|length|add:3 }}" class="empty">Записей нет{% if filters.date_from or filters.date_to or filters.group or filters.child %} — попробуйте изменить фильтр{% endif %}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</form>
+
+{% if page.has_other_pages %}
+<nav class="pager" aria-label="Страницы">
+  {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">← Назад</a>{% endif %}
+  <span class="muted">Страница {{ page.number }} из {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.next_page_number }}">Вперёд →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if can_bulk and rows %}
+<script>
+  // Отметка записей для «Изменить отмеченные» / «Удалить отмеченные»
+  (() => {
+    const form = document.getElementById("bulk-form");
+    const boxes = [...form.querySelectorAll("input[name=ids]")];
+    const pageBox = document.getElementById("bulk-page");
+    const allButton = document.getElementById("bulk-all");
+    const count = document.getElementById("bulk-count");
+    const TOTAL = {{ page.paginator.count }};
+    const update = () => {
+      const checked = boxes.filter((box) => box.checked).length;
+      const all = form.elements.all.value === "1";
+      pageBox.checked = checked === boxes.length;
+      pageBox.indeterminate = checked > 0 && checked < boxes.length;
+      if (allButton) allButton.hidden = all || checked !== boxes.length;
+      count.textContent = all ? `Отмечены все записи: ${TOTAL}`
+        : checked ? `Отмечено: ${checked}` : "Отметьте записи галочками, чтобы изменить или удалить сразу несколько";
+      for (const button of form.querySelectorAll("button[name=action]")) button.disabled = !checked;
+    };
+    pageBox.addEventListener("change", () => {
+      for (const box of boxes) box.checked = pageBox.checked;
+      form.elements.all.value = "";
+      update();
+    });
+    for (const box of boxes) box.addEventListener("change", () => { form.elements.all.value = ""; update(); });
+    allButton?.addEventListener("click", () => { form.elements.all.value = "1"; update(); });
+    update();
+  })();
+</script>
+{% endif %}
+{% endblock %}

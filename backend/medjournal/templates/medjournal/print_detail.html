@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>{{ object }}</title>
+{% include "medjournal/_print_css.html" with landscape=False %}
+</head><body>
+<div class="noprint"><button onclick="window.print()">Печать</button> <a href="{% url 'medjournal:record_word' journal.slug object.pk %}">Скачать Word</a></div>
+<div class="org">{{ org_name }}</div>
+<h1>{{ record_title }}</h1>
+<table class="kv">
+  {% for name, value in fields %}<tr><td>{{ name }}</td><td>{{ value|linebreaksbr }}</td></tr>{% endfor %}
+</table>
+{% for inl in inlines %}
+  <h1 style="font-size:12pt">{{ inl.title }}</h1>
+  <table>
+    <thead><tr><th>№</th>{% for h in inl.headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in inl.rows %}<tr><td>{{ forloop.counter }}</td>{% for c in row %}<td>{{ c|linebreaksbr }}</td>{% endfor %}</tr>
+    {% empty %}<tr><td colspan="{{ inl.headers|length|add:1 }}">&nbsp;</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% endfor %}
+<div class="sign"><span>Медицинская сестра ____________________</span><span>Руководитель ____________________ {{ org_head }}</span></div>
+<p style="font-size:8pt;color:#555">Сформировано {{ printed_at|date:"d.m.Y H:i" }}</p>
+</body></html>

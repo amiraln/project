@@ -1,0 +1,92 @@
+{% extends "payments/base.html" %}
+{% block title %}Загрузка из e-orda{% endblock %}
+{% block topbar_start %}<span class="brand" aria-hidden="true">Т</span>{% endblock %}
+{% block heading %}Загрузка из e-orda{% endblock %}
+{% block account %}{% endblock %}
+
+{% block content %}
+<div class="card section" style="max-width:440px;margin:0 auto">
+  <p id="status" role="status">Ожидаю данные из e-orda…</p>
+  <form id="save" class="field" style="margin-top:14px" hidden>
+    <label for="month">Месяц табеля</label>
+    <div style="display:flex;gap:8px">
+      <input type="month" id="month" name="month" required style="flex:1">
+      <button class="btn btn-primary">Сохранить</button>
+    </div>
+  </form>
+  <a class="btn" id="open" style="margin-top:14px" hidden>Открыть табель</a>
+</div>
+{{ eorda_origins|json_script:"origins" }}
+{{ timesheet|json_script:"timesheet" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const ORIGINS = JSON.parse(document.getElementById("origins").textContent);
+  const statusEl = document.getElementById("status");
+  const form = document.getElementById("save");
+
+  function show(text, color) {
+    statusEl.textContent = text;
+    statusEl.style.color = color ? `var(--${color})` : "";
+  }
+
+  async function save(url, body) {
+    show("Сохранение…");
+    try {
+      const result = await postJSON(url, body);
+      if ("BroadcastChannel" in window) new BroadcastChannel("payments").postMessage("updated");  // обновит открытый табель
+      return result;
+    } catch (e) {
+      show(e.message, "red");
+    }
+  }
+
+  addEventListener("message", async (e) => {
+    const data = e.data;
+    if (!ORIGINS.includes(e.origin) || !data || typeof data !== "object") return;
+    if (data.error) return show(data.error, "red");
+    if (data.kind === "progress") return show(`Загружаю контакты из e-orda: ${data.done} из ${data.total}…`);
+
+    if (data.kind === "timesheet") {
+      show(`Табель № ${data.id}, детей: ${data.rows.length}. Выберите месяц и сохраните.`);
+      const now = new Date();
+      form.month.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      form.hidden = false;
+      form.onsubmit = async (ev) => {
+        ev.preventDefault();
+        form.hidden = true;
+        const month = form.month.value;
+        const result = await save("{% url 'payments:receive_data' %}", {month, result: data.rows});
+        if (!result) return (form.hidden = false);
+        show(`Сохранено детей: ${result.count}`, "green");
+        const link = document.getElementById("open");
+        link.href = "{% url 'payments:index' %}?month=" + month;
+        link.hidden = false;
+      };
+    }
+
+    if (data.kind === "parents") {
+      const result = await save("{% url 'payments:guardians_import' %}", {pupils: data.pupils});
+      if (!result) return;
+      const notes = [`Контакты обновлены: детей — ${data.pupils.length}, контактов — ${result.guardians}.`];
+      if (data.failed) notes.push(`Не открылись карточки ${data.failed} детей — их прежние контакты сохранены.`);
+      if (data.failedGroups?.length) notes.push(`Не открылись списки групп: ${data.failedGroups.join(", ")}.`);
+      if (data.failedContracts) notes.push(`Не открылись договоры ${data.failedContracts} детей — их прежние договоры сохранены.`);
+      if ((data.v || 0) < 3) notes.push("Закладка «Родители» устарела и не загружает, кто отец и кто мать, адрес и договор: удалите её и перетащите заново из «Загрузить из e-orda» в табеле.");
+      show(notes.join(" "), notes.length > 1 ? "orange" : "green");
+    }
+  });
+
+  // Закладка ждёт готовности окна и получает детей и группы из табеля — с них начинается загрузка контактов
+  const timesheet = JSON.parse(document.getElementById("timesheet").textContent);
+  if (window.opener) {
+    for (const origin of ORIGINS) {
+      window.opener.postMessage("ready", origin); // так готовности ждут закладки, перетащенные до этого обновления
+      window.opener.postMessage({ready: true, ...timesheet}, origin);
+    }
+  } else {
+    show("Это окно открывается закладкой на странице e-orda.");
+  }
+</script>
+{% endblock %}

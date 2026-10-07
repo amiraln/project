@@ -1,0 +1,223 @@
+{% extends "payments/base.html" %}
+{% block title %}Табель · {{ group.name|default:"Все группы" }} · {{ month_label }}{% endblock %}
+
+{% block style %}
+<style>
+  .workspace{flex:1;display:flex;flex-direction:column;min-width:0}
+  .monthbar{position:sticky;top:60px;z-index:20;display:flex;align-items:center;gap:10px 20px;flex-wrap:wrap;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--line)}
+  .month-nav{display:flex;align-items:center;gap:6px}
+  .month-select{min-width:180px;min-height:36px;font-weight:600;text-align:center;cursor:pointer}
+  .section-links{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+  .section-links a{padding:7px 12px;border-radius:8px;color:var(--text);font-weight:500;text-decoration:none;white-space:nowrap}
+  .section-links a:hover{background:var(--soft);color:var(--accent)}
+
+  .layout{flex:1;display:grid;grid-template-columns:230px minmax(0,1fr)}
+  .groups{position:sticky;top:117px;align-self:start;height:calc(100vh - 117px);overflow-y:auto;padding:16px 0;background:var(--card);border-right:1px solid var(--line)}
+  .groups-title{padding:0 18px 10px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .groups ul{margin:0;padding:0;list-style:none}
+  .group-link{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 18px;border-left:3px solid transparent;color:var(--text);font-weight:500;text-decoration:none}
+  .group-link:hover{background:var(--hover)}
+  .group-link[aria-current]{border-left-color:var(--accent);background:var(--accent-soft);color:var(--accent-dark);font-weight:600}
+  .group-link span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .groups hr{margin:8px 18px;border:0;border-top:1px solid var(--line)}
+
+  .sheet{min-width:0;padding:18px 22px 48px}
+  .count{color:var(--muted)}
+
+  .timesheet td{white-space:nowrap}
+  .col-name{position:sticky;left:0;z-index:1;background:var(--card);box-shadow:1px 0 0 var(--line)}
+  thead .col-name{background:var(--soft)}
+  .group-cell{display:block;max-width:140px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:13px}
+  .days{display:inline-flex;gap:2px;vertical-align:middle}
+  .days > span{display:grid;place-items:center;width:17px;height:22px;border-radius:4px;font-size:8px;font-weight:700;line-height:1}
+  .days-head > span{height:auto;color:var(--muted);font-size:9px;font-weight:600}
+  .d.present{background:var(--green-bg);color:var(--green)}
+  .d.absent_reason{background:var(--orange-bg);color:var(--orange)}
+  .d.weekend{background:var(--red-bg);color:var(--red)}
+  .d.absent,.d.unknown{background:var(--soft)}
+  .d.empty{border:1px dashed var(--line)}
+  .total{font-weight:700}
+
+  .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;color:var(--muted);font-size:12px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend .d{width:12px;height:12px;border-radius:3px}
+
+  .steps{margin:0 0 18px;padding-left:20px;line-height:1.6}
+  .steps li + li{margin-top:6px}
+  .bookmark{display:flex;gap:8px;margin-bottom:10px}
+  .bookmark a{flex:1;display:flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border:1px dashed var(--accent);border-radius:10px;background:var(--accent-soft);color:var(--accent-dark);font-weight:600;text-decoration:none;cursor:grab}
+  .bookmark a::before{content:"★"}
+
+  @media (max-width:880px){
+    .monthbar{position:static;padding:10px 12px}
+    .month-nav{flex:1}
+    .month-select{flex:1;min-width:0}
+    .section-links{margin-left:0;overflow-x:auto;flex-wrap:nowrap;width:100%}
+    .layout{grid-template-columns:1fr}
+    .groups{position:static;height:auto;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line)}
+    .groups-title,.groups hr{display:none}
+    .groups ul{display:flex;gap:6px;overflow-x:auto}
+    .group-link{flex:none;padding:6px 12px;border:1px solid var(--line);border-radius:999px}
+    .group-link[aria-current]{border-color:var(--accent)}
+    .sheet{padding:12px 12px 40px}
+  }
+</style>
+{% endblock %}
+
+{% block topbar_start %}<a class="brand" href="{% url 'payments:index' %}" aria-label="Табель — в начало">Т</a>{% endblock %}
+{% block heading %}Табель{% endblock %}
+{% block actions %}
+  <button type="button" class="btn btn-primary" data-open-dialog="eorda-dialog">Загрузить из e-orda</button>
+  <a class="btn" href="/staff">Кабинет</a>
+  <a class="btn" href="{% url 'admin:index' %}">Админка</a>
+{% endblock %}
+
+{% block main_class %}workspace{% endblock %}
+{% block content %}
+<div class="monthbar">
+  <nav class="month-nav" aria-label="Месяц">
+    <a class="btn icon-btn" href="{{ prev_url }}" aria-label="Предыдущий месяц" title="Предыдущий месяц">‹</a>
+    <select class="month-select" aria-label="Месяц" onchange="location.href = this.value">
+      {% for m in months %}<option value="{{ m.url }}"{% if m.value == month %} selected{% endif %}>{{ m.label }}</option>{% endfor %}
+    </select>
+    <a class="btn icon-btn" href="{{ next_url }}" aria-label="Следующий месяц" title="Следующий месяц">›</a>
+  </nav>
+  <nav class="section-links" aria-label="Разделы">
+    <a href="{% url 'payments:debts' %}">Долги по детям</a>
+    <a href="{% url 'payments:parents' %}">Родители</a>
+    <a href="{% url 'payments:changelog' %}?month={{ month }}">Журнал изменений</a>
+    <a href="{% url 'medjournal:index' %}">Медицинская документация</a>
+  </nav>
+</div>
+
+<div class="layout">
+  <aside class="groups" aria-labelledby="groups-title">
+    <h2 class="groups-title" id="groups-title">Группы</h2>
+    {% if groups %}
+    <ul>
+      <li><a class="group-link" href="?month={{ month }}"{% if not group %} aria-current="page"{% endif %}><span>Все группы</span><span class="badge">{{ total_all }}</span></a></li>
+      <li><hr></li>
+      {% for g in groups %}
+      <li><a class="group-link" href="?month={{ month }}&amp;group={{ g.gid }}" title="{{ g.name }}"{% if g.gid == group.gid %} aria-current="page"{% endif %}><span>{{ g.name }}</span><span class="badge">{{ g.count }}</span></a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted small" style="padding:0 18px">Нет данных за этот месяц</p>
+    {% endif %}
+  </aside>
+
+  <section class="sheet" aria-label="Табель за {{ month_label }}">
+    {% if not records %}
+    <div class="card empty">
+      <h2>Нет данных за {{ month_label }}</h2>
+      <p>Откройте табель группы в e-orda и нажмите закладку «Табель» — данные появятся здесь.</p>
+      <button type="button" class="btn btn-primary" data-open-dialog="eorda-dialog">Как загрузить из e-orda</button>
+    </div>
+    {% else %}
+    <div class="toolbar">
+      <input class="search" type="search" id="search" placeholder="Поиск по ФИО, ИИН или группе" aria-label="Поиск по ФИО, ИИН или группе" autocomplete="off">
+      <span class="count" aria-live="polite">Детей: <b id="shown">{{ records|length }}</b></span>
+      <div class="toolbar-end">
+        {% if group %}<a class="btn" href="{% url 'payments:print_group' group.gid %}?month={{ month }}" target="_blank">Печать группы</a>{% endif %}
+        <button type="button" class="btn btn-danger" id="clear-month">Очистить месяц</button>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <table class="data timesheet" id="timesheet">
+        <thead>
+          <tr>
+            <th class="col-name">Ребёнок</th>
+            {% if not group %}<th>Группа</th>{% endif %}
+            <th><div class="days days-head" aria-label="Дни месяца">{% for n in day_nums %}<span>{{ n }}</span>{% endfor %}</div></th>
+            <th class="num">Отпуск</th>
+            <th class="num">Больн.</th>
+            <th class="num" title="Оплата, внесённая в прошлом месяце">Прошлый мес.</th>
+            <th class="num">Ежемес.</th>
+            <th class="num">Итого</th>
+            <th class="num">Переплата</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in records %}
+          <tr data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}">
+            <td class="col-name"><a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ month }}">{{ r.fio }}</a><span class="sub">{{ r.iin }}{% if r.iin and r.age %} · {% endif %}{{ r.age }}</span></td>
+            {% if not group %}<td><span class="group-cell" title="{{ r.group }}">{{ r.group }}</span></td>{% endif %}
+            <td><div class="days">{% for d in r.days %}<span class="d {{ d.type }}" title="{{ d.num }}{% if d.label %}: {{ d.label }}{% elif d.type == 'present' %}: присутствовал{% elif d.type == 'weekend' %}: выходной{% endif %}">{{ d.ct }}</span>{% endfor %}</div></td>
+            <td class="num">{% if r.vacation_days %}<span class="badge badge-orange">{{ r.vacation_days }}</span>{% else %}<span class="zero">0</span>{% endif %}</td>
+            <td class="num">{% if r.sick_days %}<span class="badge badge-orange">{{ r.sick_days }}</span>{% else %}<span class="zero">0</span>{% endif %}</td>
+            <td class="num{% if not r.last_payment %} zero{% endif %}">{{ r.last_payment|floatformat:"0g" }}</td>
+            <td class="num">{{ r.monthly|floatformat:"0g" }}</td>
+            <td class="num total">{{ r.total|floatformat:"0g" }}</td>
+            <td class="num {% if r.overpay < 0 %}neg{% else %}pos{% endif %}">{{ r.overpay|floatformat:"0g" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="empty" id="no-results" hidden>Никого не нашли. Проверьте написание или очистите поиск.</p>
+    </div>
+    <div class="legend" aria-hidden="true">
+      <span><i class="d present"></i>присутствовал</span>
+      <span><i class="d absent_reason"></i>отсутствовал по причине (код)</span>
+      <span><i class="d weekend"></i>выходной</span>
+      <span><i class="d absent"></i>отсутствовал</span>
+      <span><i class="d empty"></i>нет отметки</span>
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+<dialog class="dialog" id="eorda-dialog" aria-labelledby="eorda-title">
+  <form class="dialog-head" method="dialog">
+    <h2 id="eorda-title">Загрузка из e-orda</h2>
+    <button class="btn icon-btn" aria-label="Закрыть">×</button>
+  </form>
+  <div class="dialog-body">
+    <ol class="steps">
+      <li>Перетащите кнопки ниже на панель закладок браузера (или скопируйте ссылку и создайте закладку вручную). Это нужно сделать один раз.</li>
+      <li><b>Табель:</b> откройте табель в e-orda и нажмите закладку «Табель». В окне сайта выберите месяц и сохраните — таблица здесь обновится сама.</li>
+      <li><b>Родители:</b> войдите в e-orda и нажмите закладку «Родители» на любой её странице. Для всех групп и детей из табеля загрузятся контакты родителей (кто отец, кто мать), адрес ребёнка, номер и дата договора.</li>
+    </ol>
+    <div class="bookmark"><a id="bm-timesheet" href="#">Табель</a><button type="button" class="btn" data-copy="bm-timesheet">Копировать</button></div>
+    <div class="bookmark"><a id="bm-parents" href="#">Родители</a><button type="button" class="btn" data-copy="bm-parents">Копировать</button></div>
+    <p class="muted small">Нужны вход на этот сайт под администратором и разрешённые всплывающие окна для e-orda.</p>
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  {% include "payments/_bookmarklets.js" %}
+
+  const SITE = location.origin + "{% url 'payments:eorda_bridge' %}";
+  document.getElementById("bm-timesheet").href = bookmarklet(SITE, "timesheet");
+  document.getElementById("bm-parents").href = bookmarklet(SITE, "parents");
+  for (const link of document.querySelectorAll(".bookmark a")) link.addEventListener("click", (e) => e.preventDefault());
+
+  for (const button of document.querySelectorAll("[data-copy]")) {
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).href);
+      button.textContent = "Скопировано";
+      setTimeout(() => (button.textContent = "Копировать"), 1500);
+    });
+  }
+
+  const dialog = document.getElementById("eorda-dialog");
+  for (const button of document.querySelectorAll("[data-open-dialog]")) button.addEventListener("click", () => dialog.showModal());
+  dialog.addEventListener("click", (e) => e.target === dialog && dialog.close());  // клик по фону
+
+  // Окно e-orda сообщает о сохранённых данных — показываем их без ручного обновления
+  if ("BroadcastChannel" in window) new BroadcastChannel("payments").onmessage = () => location.reload();
+
+  searchList("#timesheet tbody tr");
+  document.getElementById("clear-month")?.addEventListener("click", async () => {
+    if (!confirm("Удалить табель за {{ month_label }}? Отметки и оплаты, внесённые вручную за этот месяц, тоже удалятся.")) return;
+    try {
+      await postJSON("{% url 'payments:clear_data' %}", {month: "{{ month }}"});
+      location.reload();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+</script>
+{% endblock %}

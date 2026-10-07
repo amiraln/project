@@ -1,0 +1,67 @@
+{% extends "payments/base.html" %}
+{% block title %}Родители и контакты{% endblock %}
+{% block heading %}Родители и контакты{% endblock %}
+{% block actions %}<a class="btn" href="{% url 'payments:debts' %}">Долги по детям</a>{% endblock %}
+
+{% block style %}
+<style>
+  .people{display:grid;gap:12px}
+  .person{padding:16px 18px}
+  .person-head{display:flex;align-items:center;gap:12px}
+  .avatar{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:11px;background:var(--accent);color:#fff;font-weight:700}
+  .person-head .grow{flex:1;min-width:0}
+  .guardians{margin:12px 0 0;padding:0;list-style:none}
+  .guardians li{display:flex;align-items:center;flex-wrap:wrap;gap:4px 16px;padding:9px 0 0;margin-top:9px;border-top:1px solid var(--line)}
+  .guardians b{min-width:220px;font-weight:600}
+  .guardians a{font-weight:600;text-decoration:none;white-space:nowrap}
+  .no-contacts{margin-top:10px;color:var(--muted);font-size:13px;font-style:italic}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stats">
+  <div class="card stat"><p class="stat-label">Детей</p><p class="stat-value">{{ rows|length }}</p></div>
+  <div class="card stat"><p class="stat-label">С контактами</p><p class="stat-value">{{ with_contacts }}</p></div>
+  <div class="card stat"><p class="stat-label">Всего контактов</p><p class="stat-value">{{ total_guardians }}</p></div>
+</div>
+
+{% if rows %}
+<div class="toolbar">
+  <input class="search" type="search" id="search" placeholder="Поиск по ребёнку, родителю или телефону" aria-label="Поиск по ребёнку, родителю или телефону" autocomplete="off">
+  <span class="muted" aria-live="polite">Детей: <b id="shown">{{ rows|length }}</b></span>
+</div>
+<div class="people" id="list">
+  {% for r in rows %}
+  <article class="card person" data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}{% for g in r.guardians %} {{ g.fio|lower }} {{ g.phone }} {{ g.email|lower }}{% endfor %}">
+    <div class="person-head">
+      <span class="avatar" aria-hidden="true">{{ r.fio|first }}</span>
+      <div class="grow">
+        <a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ r.month }}">{{ r.fio }}</a>
+        <span class="sub">{{ r.group|default:"—" }} · ИИН {{ r.iin|default:"—" }}</span>
+      </div>
+      {% if r.owed %}<span class="badge badge-red">Долг {{ r.owed|floatformat:"0g" }} ₸</span>{% else %}<span class="badge badge-green">Нет долга</span>{% endif %}
+    </div>
+    {% if r.guardians %}
+    <ul class="guardians">
+      {% for g in r.guardians %}
+      <li>
+        <b>{{ g.fio|default:"—" }}{% if g.gender %} <span class="badge">{{ g.get_gender_display }}</span>{% endif %}</b>
+        {% for phone in g.phones %}<a href="tel:{{ phone }}">{{ phone }}</a>{% endfor %}
+        {% if g.email %}<a href="mailto:{{ g.email }}">{{ g.email }}</a>{% endif %}
+        {% if g.iin %}<span class="muted small">ИИН {{ g.iin }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="no-contacts">Контакты не загружены</p>
+    {% endif %}
+  </article>
+  {% endfor %}
+  <p class="card empty" id="no-results" hidden>Никого не нашли.</p>
+</div>
+{% else %}
+<div class="card empty"><h2>Нет данных</h2><p>Список детей появится после загрузки табеля.</p></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}<script>searchList("#list > .person");</script>{% endblock %}

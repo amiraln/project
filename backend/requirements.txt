@@ -1,0 +1,9 @@
+Django>=5.1,<5.3
+djangorestframework>=3.15
+Pillow>=10.4
+nh3>=0.2.18
+python-dotenv>=1.0
+gunicorn>=23.0
+python-docx>=1.1  # медицинские журналы в Word
+# для PostgreSQL раскомментируйте:
+# psycopg[binary]>=3.2

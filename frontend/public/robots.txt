@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /api/
+Disallow: /manage/
+Disallow: /payments/
+Disallow: /kk/staff
+Disallow: /ru/staff

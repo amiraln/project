@@ -1,0 +1,12 @@
+{% extends "payments/base.html" %}
+{% block title %}Нет доступа{% endblock %}
+{% block topbar_start %}<a class="btn" href="/staff">← Кабинет</a>{% endblock %}
+{% block account %}{% endblock %}
+
+{% block content %}
+<div class="card empty" style="max-width:460px;margin:40px auto">
+  <h2>Нет доступа</h2>
+  <p>У вашей учётной записи нет прав на этот раздел. Попросите администратора выдать доступ или войдите под другой учётной записью.</p>
+  <form method="post" action="{% url 'payments:logout' %}">{% csrf_token %}<button type="submit" class="btn btn-primary">Сменить пользователя</button></form>
+</div>
+{% endblock %}

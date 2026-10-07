@@ -1,0 +1,56 @@
+{% extends "payments/base.html" %}
+{% block title %}Медицинская документация{% endblock %}
+
+{% block style %}
+<style>
+  .journals{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:28px}
+  .journal{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;color:var(--text);font-weight:500;text-decoration:none;transition:border-color .15s,box-shadow .15s}
+  .journal:hover{border-color:var(--accent);box-shadow:0 4px 12px rgba(16,24,40,.08)}
+  .journal-num{display:grid;place-items:center;flex:none;min-width:34px;height:34px;padding:0 6px;border-radius:9px;background:var(--accent-soft);color:var(--accent-dark);font-weight:700;font-size:13px}
+  .section-heading{margin:0 0 12px;font-size:15px;font-weight:700}
+
+  .filters{align-items:flex-end}
+  .filters .field{flex:0 1 180px}
+  .filters .field-wide{flex-basis:260px}
+  .actions{white-space:nowrap}
+  .actions a{font-weight:500;text-decoration:none}
+  .actions a:hover{text-decoration:underline}
+  .actions .danger{color:var(--red)}
+  .data td{vertical-align:top}
+  .data th:not(:first-child){min-width:90px}
+
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px 18px}
+  .form-grid .field :is(input:not([type=checkbox]),select,textarea){width:100%}
+  .check-field{flex-direction:row;align-items:center;gap:8px;padding-top:22px;color:var(--text)}
+  .inline-table td :is(input:not([type=checkbox]),select,textarea){width:100%;min-width:90px}
+  .form-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .period{margin:22px 0 0;padding:12px 16px 16px;border:1px dashed var(--line);border-radius:12px}
+  .period legend{padding:0 6px;font-weight:700}
+  .period-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 22px;margin-top:10px}
+  .period-row .field{flex:0 1 220px}
+  .period-count{padding-bottom:9px;font-weight:600}
+  .pager{display:flex;align-items:center;gap:12px;margin-top:14px}
+
+  .group-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+  .group-tab{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--text);font-size:13px;font-weight:600;text-decoration:none}
+  .group-tab:hover{border-color:var(--accent);color:var(--accent)}
+  .group-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .group-tab .n{font-size:11px;font-weight:500;opacity:.75}
+  .bulk-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:10px;padding:8px 12px;border-radius:10px;background:var(--soft);font-size:13px}
+  .bulk-bar .btn[disabled]{opacity:.45;pointer-events:none}
+  .data .pick{width:36px}
+  .bulk-value[hidden]{display:none}
+  .bulk-sample{margin:6px 0 14px;padding-left:20px}
+</style>
+{% endblock %}
+
+{% block topbar_start %}
+  {% if user.is_staff and user.is_superuser %}<a class="btn" href="{% url 'payments:index' %}">← Табель</a>
+  {% else %}<a class="btn" href="/staff">← Кабинет</a>{% endif %}
+{% endblock %}
+{% block heading %}<a href="{% url 'medjournal:index' %}">Медицинская документация</a>{% endblock %}
+
+{% block content %}
+{% if messages %}<ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>{% endif %}
+{% block body %}{% endblock %}
+{% endblock %}

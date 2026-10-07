@@ -1,0 +1,13 @@
+{% extends "medjournal/base.html" %}
+{% block title %}Удалить запись{% endblock %}
+{% block body %}
+<form method="post" class="card empty" style="max-width:520px;margin:24px auto">
+  {% csrf_token %}
+  <h2>Удалить запись?</h2>
+  <p>{{ journal.title }}: <b>{{ object }}</b>. Это действие нельзя отменить.</p>
+  <div class="form-actions" style="justify-content:center">
+    <button class="btn btn-danger-solid" type="submit">Удалить</button>
+    <a class="btn" href="{% url 'medjournal:list' journal.slug %}">Отмена</a>
+  </div>
+</form>
+{% endblock %}

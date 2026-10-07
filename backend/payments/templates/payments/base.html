@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="csrf-token" content="{{ csrf_token }}">
+<title>{% block title %}Табель{% endblock %} · Ботаканым</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root{
+    --bg:#f4f6f5;--card:#fff;--line:#e1e7e4;--soft:#eff3f1;--hover:#f7f9f8;
+    --text:#17252c;--muted:#5b696f;--faint:#a9b4b1;
+    --accent:#2e6b4f;--accent-dark:#1f4d38;--accent-soft:#e3efe8;
+    --green:#15803d;--green-bg:#dcfce7;--orange:#c2410c;--orange-bg:#ffedd5;--red:#b91c1c;--red-bg:#fee2e2;
+    --focus:#1b5fbf;--radius:12px;--shadow:0 1px 2px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  h1,h2,h3,p{margin:0}
+  a{color:var(--accent)}
+  :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+  [hidden]{display:none!important}
+  .muted{color:var(--muted)}
+  .small{font-size:12px}
+  .visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* Шапка */
+  .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 24px;
+    background:var(--card);border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
+  .topbar-title{font-size:16px;font-weight:700;letter-spacing:-.01em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topbar-title a{color:inherit;text-decoration:none}
+  .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .brand{display:grid;place-items:center;flex:none;width:32px;height:32px;border-radius:9px;background:var(--accent);color:#fff;font-weight:800;text-decoration:none}
+  .user{color:var(--muted);font-size:13px;white-space:nowrap}
+
+  /* Кнопки */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:9px;
+    border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;font-weight:500;text-decoration:none;
+    white-space:nowrap;cursor:pointer;transition:border-color .15s,background-color .15s,color .15s}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);color:#fff}
+  .btn-danger{color:var(--red)}
+  .btn-danger:hover{border-color:var(--red);color:var(--red);background:var(--red-bg)}
+  .btn-danger-solid{background:var(--red);border-color:var(--red);color:#fff}
+  .btn-danger-solid:hover{background:#991b1b;border-color:#991b1b;color:#fff}
+  .icon-btn{width:36px;padding:0;font-size:18px;line-height:1}
+  .inline-form{display:inline-flex;margin:0}
+
+  /* Страница и карточки */
+  .page{width:100%;max-width:1180px;margin:0 auto;padding:24px 24px 64px}
+  .page-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  .page-head h2{font-size:20px;font-weight:700;letter-spacing:-.01em}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .section{padding:20px 22px;margin-bottom:16px}
+  .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:14px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:20px}
+  .stat{padding:14px 18px}
+  .stat-label{font-size:12px;font-weight:600;color:var(--muted)}
+  .stat-value{margin-top:2px;font-size:24px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .stat-sub{font-size:12px;color:var(--muted)}
+  .empty{padding:48px 20px;text-align:center;color:var(--muted)}
+  .empty h2{font-size:18px;color:var(--text)}
+  .empty > * + *{margin-top:14px}
+  .empty h2 + p{margin-top:6px}
+
+  /* Панель над таблицей, поиск */
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .toolbar-end{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .search{flex:0 1 340px;min-width:0;min-height:38px;padding:0 12px 0 36px;
+    background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235b696f' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 4 4'/%3E%3C/svg%3E") no-repeat 12px center}
+
+  /* Таблицы */
+  .table-card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .data{width:100%;border-collapse:collapse}
+  .data th,.data td{padding:10px 12px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--line)}
+  .data thead th{background:var(--soft);color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap}
+  .data tbody tr:last-child > td,.data tbody tr:last-child > th{border-bottom:0}
+  .data tbody tr:hover > td{background:var(--hover)}
+  .data .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
+  .name-link{font-weight:600;color:var(--text);text-decoration:none}
+  .name-link:hover{color:var(--accent);text-decoration:underline}
+  .pos{color:var(--green);font-weight:600}
+  .neg{color:var(--red);font-weight:600}
+  .zero{color:var(--faint)}
+
+  /* Метки */
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap}
+  .badge-orange{background:var(--orange-bg);color:var(--orange)}
+  .badge-green{background:var(--green-bg);color:var(--green)}
+  .badge-red{background:var(--red-bg);color:var(--red)}
+
+  /* Поля ввода */
+  input,select,textarea{max-width:100%;padding:8px 10px;border:1px solid #cdd6d2;border-radius:9px;background:var(--card);color:var(--text);font:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  input[type=checkbox]{width:16px;height:16px;padding:0;accent-color:var(--accent);vertical-align:-3px}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field > label,.field > span{font-size:12px;font-weight:600;color:var(--muted)}
+  .errorlist{margin:4px 0 0;padding:0;list-style:none;color:var(--red);font-size:12px}
+
+  /* Сообщения */
+  .messages{margin:0 0 16px;padding:0;list-style:none}
+  .messages li{margin-bottom:8px;padding:11px 14px;border-radius:10px;background:var(--green-bg);color:#14532d}
+  .messages li.error{background:var(--red-bg);color:#7f1d1d}
+
+  /* Диалог */
+  .dialog{width:min(560px,calc(100% - 32px));padding:0;border:0;border-radius:16px;color:var(--text);box-shadow:0 24px 64px rgba(16,24,40,.28)}
+  .dialog::backdrop{background:rgba(16,24,40,.45)}
+  .dialog-head{display:flex;align-items:center;gap:12px;padding:20px 22px 0}
+  .dialog-head h2{font-size:17px;font-weight:700}
+  .dialog-head .btn{margin-left:auto}
+  .dialog-body{padding:16px 22px 22px}
+
+  @media (max-width:880px){
+    .topbar{flex-wrap:wrap;padding:10px 12px;gap:8px 10px}
+    .topbar-actions{width:100%;margin-left:0;overflow-x:auto;padding-bottom:2px}
+    .user{display:none}
+    .page{padding:16px 12px 48px}
+    .section{padding:16px}
+    .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .stat-value{font-size:20px}
+    .search{flex:1 1 100%}
+    .toolbar-end{margin-left:0}
+    .data th,.data td{padding:9px 10px}
+  }
+  @media print{.topbar{display:none}}
+</style>
+{% block style %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  {% block topbar_start %}<a class="btn" href="{% url 'payments:index' %}">← Табель</a>{% endblock %}
+  <h1 class="topbar-title">{% block heading %}{% endblock %}</h1>
+  <div class="topbar-actions">
+    {% block actions %}{% endblock %}
+    {% block account %}
+    <span class="user">{{ user.get_full_name|default:user.username }}</span>
+    <form class="inline-form" method="post" action="{% url 'payments:logout' %}">{% csrf_token %}<button type="submit" class="btn">Выйти</button></form>
+    {% endblock %}
+  </div>
+</header>
+<main class="{% block main_class %}page{% endblock %}">
+  {% block content %}{% endblock %}
+</main>
+<script>
+  // POST JSON в API раздела; ошибка — с понятным текстом от сервера
+  async function postJSON(url, body) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRFToken": document.querySelector("meta[name=csrf-token]").content},
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || "Не удалось сохранить. Обновите страницу и попробуйте ещё раз.");
+    return result;
+  }
+  const money = (value) => Math.round(value).toLocaleString("ru-RU");
+
+  // Поиск по списку: у элементов атрибут data-search; счётчик #shown, пустое состояние #no-results
+  function searchList(selector) {
+    const search = document.getElementById("search");
+    if (!search) return;
+    const items = [...document.querySelectorAll(selector)];
+    search.addEventListener("input", () => {
+      const query = search.value.trim().toLowerCase();
+      let shown = 0;
+      for (const item of items) {
+        item.hidden = !item.dataset.search.includes(query);
+        shown += !item.hidden;
+      }
+      document.getElementById("shown").textContent = shown;
+      document.getElementById("no-results").hidden = shown > 0;
+    });
+  }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

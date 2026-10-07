@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>{{ journal.title }}</title>
+{% include "medjournal/_print_css.html" with landscape=journal.landscape %}
+</head><body>
+<div class="noprint">
+  <button onclick="window.print()">Печать</button>
+  <a href="{% url 'medjournal:word' journal.slug %}?{{ query }}">Скачать Word</a>
+  {% if can_change %}
+  <form id="period-form" method="post" action="{% url 'medjournal:print_period' journal.slug %}">
+    {% csrf_token %}
+    <label>Начат <input type="date" name="started" value="{{ period.started|date:'Y-m-d' }}"></label>
+    <label>Окончен <input type="date" name="finished" value="{{ period.finished|date:'Y-m-d' }}"></label>
+    <span id="period-status" class="hint" aria-live="polite">Даты запоминаются для следующей печати. Пустые — впишете от руки.</span>
+  </form>
+  {% endif %}
+</div>
+{% if journal.form %}<div class="form-no">{{ journal.form }}</div>{% endif %}
+<div class="org">{{ org_name }}</div>
+<h1>{{ journal.title }}</h1>
+{% if group %}<div class="sub group">Группа: {{ group }}</div>{% endif %}
+<div class="sub">Начат <span id="started">{{ started }}</span> &nbsp;&nbsp; Окончен <span id="finished">{{ finished }}</span></div>
+{% if shown_from or shown_to %}<div class="sub">Записи за период{% if shown_from %} с {{ shown_from|date:"d.m.Y" }}{% endif %}{% if shown_to %} по {{ shown_to|date:"d.m.Y" }}{% endif %}</div>{% endif %}
+<table>
+  <thead>
+    {# у утверждённой формы графы нумеруются с 1, без «№ п/п» #}
+    <tr>{% if not journal.form %}<th>№ п/п</th>{% endif %}{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr>
+    <tr class="colnum">{% if not journal.form %}<th>1</th>{% endif %}{% for h in headers %}<th>{% if journal.form %}{{ forloop.counter }}{% else %}{{ forloop.counter|add:1 }}{% endif %}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+  {% for obj, cells in rows %}
+    <tr>{% if not journal.form %}<td>{{ forloop.counter }}</td>{% endif %}{% for c in cells %}<td>{{ c|linebreaksbr }}</td>{% endfor %}</tr>
+  {% empty %}
+    {% for i in "1234567890" %}<tr>{% if not journal.form %}<td>&nbsp;</td>{% endif %}{% for h in headers %}<td>&nbsp;</td>{% endfor %}</tr>{% endfor %}
+  {% endfor %}
+  </tbody>
+</table>
+{% if journal.footnote %}<p class="footnote">Примечание: {{ journal.footnote }}</p>{% endif %}
+{% if not journal.form %}<div class="sign"><span>Медицинская сестра ____________________</span><span>Руководитель ____________________ {{ org_head }}</span></div>{% endif %}
+<p style="font-size:8pt;color:#555">Сформировано {{ printed_at|date:"d.m.Y H:i" }}</p>
+{% if can_change %}
+<script>
+  // Даты «Начат» и «Окончен» сохраняются сразу после ввода и тут же появляются в шапке журнала
+  const periodForm = document.getElementById("period-form");
+  const periodStatus = document.getElementById("period-status");
+  periodForm.addEventListener("change", async () => {
+    periodStatus.textContent = "Сохранение…";
+    try {
+      const res = await fetch(periodForm.action, {method: "POST", body: new FormData(periodForm)});
+      const data = await res.json().catch(() => ({error: "Не удалось сохранить (" + res.status + ")"}));
+      if (!data.ok) throw new Error(data.error || "Не удалось сохранить");
+      document.getElementById("started").textContent = data.started;
+      document.getElementById("finished").textContent = data.finished;
+      periodStatus.textContent = "Сохранено";
+    } catch (e) {
+      periodStatus.textContent = e.message;
+    }
+  });
+</script>
+{% endif %}
+</body></html>

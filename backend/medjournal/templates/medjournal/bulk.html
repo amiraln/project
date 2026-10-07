@@ -1,0 +1,68 @@
+{% extends "medjournal/base.html" %}
+{% block title %}{% if action == "delete" %}Удалить записи{% else %}Изменить записи{% endif %}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <a class="btn" href="{{ back }}">← {{ journal.number }}. {{ journal.title|truncatechars:60 }}</a>
+  <h2>{% if action == "delete" %}Удалить записи{% else %}Изменить записи{% endif %}</h2>
+</div>
+
+<form method="post" class="card section">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="{{ action }}">
+  <input type="hidden" name="ids" value="{{ ids }}">
+  <input type="hidden" name="query" value="{{ query }}">
+  <input type="hidden" name="confirm" value="1">
+
+  <p>Отмечено записей: <b>{{ count }}</b></p>
+  <ul class="bulk-sample">
+    {% for obj in sample %}<li>{{ obj }}</li>{% endfor %}
+    {% if more %}<li class="muted">… и ещё {{ more }}</li>{% endif %}
+  </ul>
+
+  {% if action == "delete" %}
+  <p>Вместе с записями удалятся их вложенные строки (приёмы препарата, записи осмотров, антропометрия и т. п.). Это действие нельзя отменить.</p>
+  <div class="form-actions">
+    <button class="btn btn-danger-solid" type="submit">Удалить отмеченные записи</button>
+    <a class="btn" href="{{ back }}">Отмена</a>
+  </div>
+  {% else %}
+  {% if record_errors %}
+  <ul class="messages"><li class="error">Ничего не изменено: новое значение не подходит для записей — {{ record_errors_count }}.</li></ul>
+  <ul class="errorlist">{% for obj, message in record_errors %}<li>{{ obj }}: {{ message }}</li>{% endfor %}</ul>
+  {% endif %}
+  <div class="form-grid">
+    <div class="field">
+      <label for="bulk-field">Какое поле поменять</label>
+      <select name="field" id="bulk-field" required>
+        <option value="">— выберите поле —</option>
+        {% for f in form %}<option value="{{ f.name }}"{% if f.name == field %} selected{% endif %}>{{ f.label }}</option>{% endfor %}
+      </select>
+    </div>
+    {% for f in form %}
+    <div class="field bulk-value" data-field="{{ f.name }}"{% if f.name != field %} hidden{% endif %}>
+      {% if f.widget_type == "checkbox" %}<span>Новое значение</span><label class="check-field">{{ f }} {{ f.label }}</label>
+      {% else %}<label for="{{ f.id_for_label }}">Новое значение</label>{{ f }}{% endif %}
+      {% if f.name == field %}{{ value_errors }}{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <p class="muted small" style="margin-top:12px">Значение запишется во все отмеченные записи, остальные поля не меняются. Пустое значение очистит поле.</p>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Изменить отмеченные записи</button>
+    <a class="btn" href="{{ back }}">Отмена</a>
+  </div>
+  {% endif %}
+</form>
+{% endblock %}
+
+{% block scripts %}
+{% if action == "edit" %}
+<script>
+  // Показываем поле ввода только для выбранной колонки
+  const fieldSelect = document.getElementById("bulk-field");
+  fieldSelect.addEventListener("change", () => {
+    for (const box of document.querySelectorAll(".bulk-value")) box.hidden = box.dataset.field !== fieldSelect.value;
+  });
+</script>
+{% endif %}
+{% endblock %}

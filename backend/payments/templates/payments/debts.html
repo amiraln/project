@@ -1,0 +1,88 @@
+{% extends "payments/base.html" %}
+{% block title %}Долги по детям{% endblock %}
+{% block heading %}Долги по детям{% endblock %}
+
+{% block style %}
+<style>
+  .months-btn{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--text);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .months-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .months-btn::after{content:"";width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translateY(-2px);transition:transform .15s}
+  .months-btn[aria-expanded=true]::after{transform:rotate(-135deg) translateY(-1px)}
+  .detail > td{padding:4px 12px 14px 40px;background:var(--hover)}
+  .months{border-collapse:collapse;font-size:13px}
+  .data .months th,.data .months td{padding:4px 18px 4px 0;border:0;background:none;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .data .months th{color:var(--muted);font-size:11px}
+  .data .months :is(th,td):first-child{text-align:left}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stats">
+  <div class="card stat"><p class="stat-label">Детей в расчёте</p><p class="stat-value">{{ rows|length }}</p></div>
+  <div class="card stat"><p class="stat-label">Общий долг</p><p class="stat-value neg">{{ total_owed|floatformat:"0g" }} ₸</p></div>
+  <div class="card stat"><p class="stat-label">Общая переплата</p><p class="stat-value pos">{{ total_overpaid|floatformat:"0g" }} ₸</p></div>
+</div>
+
+{% if rows %}
+<div class="toolbar">
+  <input class="search" type="search" id="search" placeholder="Поиск по ФИО, ИИН или группе" aria-label="Поиск по ФИО, ИИН или группе" autocomplete="off">
+  <span class="muted" aria-live="polite">Детей: <b id="shown">{{ rows|length }}</b></span>
+</div>
+<div class="card table-card">
+  <table class="data" id="list">
+    <thead>
+      <tr>
+        <th>Ребёнок</th>
+        <th>Группа</th>
+        <th class="num">Месяцев</th>
+        <th class="num">Всего внесено</th>
+        <th class="num">Всего начислено</th>
+        <th class="num">Долг</th>
+        <th class="num">Переплата</th>
+      </tr>
+    </thead>
+    {% for r in rows %}
+    <tbody data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}">
+      <tr>
+        <td><a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ r.month }}">{{ r.fio }}</a><span class="sub">{{ r.iin }}</span></td>
+        <td class="muted">{{ r.group }}</td>
+        <td class="num"><button type="button" class="months-btn" aria-expanded="false" aria-controls="m{{ r.pId }}" aria-label="{{ r.months|length }} мес. — показать по месяцам">{{ r.months|length }}</button></td>
+        <td class="num">{{ r.paid|floatformat:"0g" }}</td>
+        <td class="num">{{ r.due|floatformat:"0g" }}</td>
+        <td class="num">{% if r.owed %}<span class="neg">{{ r.owed|floatformat:"0g" }}</span>{% else %}<span class="zero">—</span>{% endif %}</td>
+        <td class="num">{% if r.net > 0 %}<span class="pos">{{ r.net|floatformat:"0g" }}</span>{% else %}<span class="zero">—</span>{% endif %}</td>
+      </tr>
+      <tr class="detail" id="m{{ r.pId }}" hidden>
+        <td colspan="7">
+          <table class="months">
+            <thead><tr><th>Месяц</th><th>Внесено</th><th>Начислено</th><th>Разница</th></tr></thead>
+            <tbody>
+              {% for m in r.months %}
+              <tr><td>{{ m.label }}</td><td>{{ m.paid|floatformat:"0g" }}</td><td>{{ m.due|floatformat:"0g" }}</td><td class="{% if m.diff < 0 %}neg{% else %}pos{% endif %}">{{ m.diff|floatformat:"0g" }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    </tbody>
+    {% endfor %}
+  </table>
+  <p class="empty" id="no-results" hidden>Никого не нашли.</p>
+</div>
+{% else %}
+<div class="card empty"><h2>Нет данных</h2><p>Долги считаются по загруженному табелю.</p></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  for (const button of document.querySelectorAll(".months-btn")) {
+    button.addEventListener("click", () => {
+      const open = button.getAttribute("aria-expanded") !== "true";
+      button.setAttribute("aria-expanded", open);
+      document.getElementById(button.getAttribute("aria-controls")).hidden = !open;
+    });
+  }
+  searchList("#list > tbody");
+</script>
+{% endblock %}

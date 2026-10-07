@@ -1,0 +1,48 @@
+{% extends "payments/base.html" %}
+{% block title %}Журнал изменений{% endblock %}
+{% block heading %}Журнал изменений{% endblock %}
+{% block actions %}<a class="btn" href="{% url 'admin:payments_changelog_changelist' %}">Открыть в админке</a>{% endblock %}
+
+{% block style %}
+<style>
+  .day{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--soft);font-weight:700;font-size:12px}
+  .arrow{margin:0 6px;color:var(--muted)}
+  .old{color:var(--muted)}
+  .new{font-weight:600}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <form method="get">
+    <select name="month" aria-label="Месяц" onchange="this.form.submit()">
+      <option value="">Все месяцы</option>
+      {% for m in months %}<option value="{{ m.value }}"{% if m.value == month %} selected{% endif %}>{{ m.label }}</option>{% endfor %}
+    </select>
+    <noscript><button class="btn" type="submit">Показать</button></noscript>
+  </form>
+  <span class="muted">Записей: <b>{{ total }}</b>{% if total > 500 %} — показаны последние 500{% endif %}</span>
+</div>
+
+<div class="card table-card">
+  {% if logs %}
+  <table class="data">
+    <thead><tr><th>Когда</th><th>Кто</th><th>Ребёнок</th><th>Месяц</th><th>День</th><th>Изменение</th></tr></thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td class="muted" style="white-space:nowrap">{{ log.created_at|date:"d.m.Y H:i" }}</td>
+        <td><span class="badge">{{ log.username|default:"—" }}</span></td>
+        <td><a class="name-link" href="{% url 'payments:child_detail' log.p_id %}?month={{ log.month }}">{{ log.child_fio }}</a><span class="sub">{{ log.group_name }}</span></td>
+        <td class="muted" style="white-space:nowrap">{{ log.month_label }}</td>
+        <td><span class="day">{{ log.day_num }}</span></td>
+        <td><span class="old">{{ log.old_status }}</span><span class="arrow" aria-label="на">→</span><span class="new">{{ log.new_status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><h2>Изменений пока нет</h2><p>Здесь появятся отметки, изменённые вручную в карточках детей.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

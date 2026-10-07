@@ -1,0 +1,19 @@
+# /etc/systemd/system/kindergarten-site.service
+# sudo systemctl daemon-reload && sudo systemctl enable --now kindergarten-site
+[Unit]
+Description=Kindergarten public website (gunicorn)
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/kindergarten-site/backend
+RuntimeDirectory=kindergarten-site
+ExecStart=/var/www/kindergarten-site/venv/bin/gunicorn config.wsgi:application \
+    --bind unix:/run/kindergarten-site/gunicorn.sock \
+    --workers 3 --timeout 60 \
+    --access-logfile - --error-logfile -
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

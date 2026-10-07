@@ -1,0 +1,16 @@
+{% extends "medjournal/base.html" %}
+{% block body %}
+{% for title, items in sections %}
+  <h2 class="section-heading">{{ title }}</h2>
+  <div class="journals">
+  {% for journal, count in items %}
+    <a class="card journal" href="{% url 'medjournal:list' journal.slug %}">
+      <span class="journal-num">{{ journal.number }}</span>
+      <span>{{ journal.title }}<span class="sub">записей: {{ count }}</span></span>
+    </a>
+  {% endfor %}
+  </div>
+{% empty %}
+  <div class="card empty"><h2>Нет доступных журналов</h2><p>Попросите администратора выдать права на нужные журналы.</p></div>
+{% endfor %}
+{% endblock %}
