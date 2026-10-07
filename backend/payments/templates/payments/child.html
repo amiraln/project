@@ -10,8 +10,11 @@
   .facts b{color:var(--text);font-weight:600}
   .columns{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;align-items:start}
 
-  .pay-form{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .pay-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .pay-form input,.pay-form select{width:100%}
   .pay-form input{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+  .pay-form select{min-height:41px;font-size:15px;font-weight:600}
+  .pay-form .pay-hint{grid-column:1/-1;margin-top:-4px;color:var(--muted);font-size:12px}
   .save-status{grid-column:1/-1;min-height:20px;font-size:13px;color:var(--muted)}
   .save-status.ok{color:var(--green)}
   .save-status.err{color:var(--red)}
@@ -84,6 +87,10 @@
       <span>Договор <b>{% if pupil.contract_number or pupil.contract_date %}{% if pupil.contract_number %}№ {{ pupil.contract_number }}{% endif %}{% if pupil.contract_date %} от {{ pupil.contract_date|date:"d.m.Y" }}{% endif %}{% else %}—{% endif %}</b></span>
       <span>Адрес <b>{{ pupil.address|default:"—" }}</b></span>
     </p>
+    <p class="facts">
+      <span>Семья <b>{% if child.large_family %}<span class="badge badge-family">многодетная</span>{% else %}—{% endif %}</b>{% if pupil %} <a href="{% url 'admin:payments_child_change' pupil.pk %}" title="Многодетная семья: определять по родителям, «да» или «нет»">изменить</a>{% endif %}</span>
+      <span>Братья и сёстры <b>{% for s in siblings %}<a href="{% url 'payments:child_detail' s.p_id %}?month={{ month }}">{{ s.fio }}</a>{% if s.group_name %} ({{ s.group_name }}){% endif %}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</b></span>
+    </p>
   </div>
 </div>
 
@@ -114,8 +121,15 @@
     <section class="card section" aria-labelledby="pay-title">
       <h3 class="section-title" id="pay-title">Оплата</h3>
       <form class="pay-form" id="pay-form">
+        <label class="field"><span>Способ оплаты</span>
+          <select name="method">
+            <option value="">— не отмечена</option>
+            {% for value, label in pay_methods %}<option value="{{ value }}"{% if value == child.method %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
         <label class="field"><span>Оплата в прошлом месяце, ₸</span><input type="text" inputmode="decimal" name="last_payment" value="{{ child.last_payment|floatformat:"0" }}" autocomplete="off"></label>
-        <label class="field"><span>Ежемесячная оплата, ₸</span><input type="text" inputmode="decimal" name="monthly" value="{{ child.monthly|floatformat:"0" }}" autocomplete="off"></label>
+        <label class="field"><span>Ежемесячная оплата, ₸</span><input type="text" inputmode="decimal" name="monthly" value="{% if not child.monthly_default %}{{ child.monthly|floatformat:"0" }}{% endif %}" placeholder="{{ default_monthly|floatformat:"0g" }} — по умолчанию" autocomplete="off"></label>
+        <p class="pay-hint">Пустое поле — по умолчанию: {{ default_monthly|floatformat:"0g" }} ₸{% if child.large_family %} (многодетная семья){% endif %}. Способ оплаты без суммы записывает сумму к оплате.</p>
         <p class="save-status" id="pay-status" aria-live="polite">Сохраняется автоматически</p>
       </form>
     </section>
@@ -194,20 +208,27 @@
   }
   showAbsences(JSON.parse(document.getElementById("absences-data").textContent));
 
-  // Оплата: сохраняется при уходе с поля или по Enter
+  // Оплата: поле сохраняется при уходе с него или по Enter, способ оплаты — сразу
   const form = document.getElementById("pay-form");
   const payStatus = document.getElementById("pay-status");
-  async function savePayment() {
+  function showPayment(totals) {
+    const fields = form.elements;  // form.method — метод отправки формы, а не поле
+    fields.method.value = totals.method;
+    fields.last_payment.value = Math.round(totals.last_payment);
+    fields.monthly.value = totals.monthly_default ? "" : Math.round(totals.monthly);
+  }
+  async function savePayment(e) {
     payStatus.className = "save-status";
     payStatus.textContent = "Сохранение…";
     try {
-      const res = await postJSON("{% url 'payments:save_payment' %}", {...CHILD, last_payment: form.last_payment.value, monthly: form.monthly.value});
+      const res = await postJSON("{% url 'payments:save_payment' %}", {...CHILD, [e.target.name]: e.target.value});
       showTotals(res.totals);
+      showPayment(res.totals);
       payStatus.className = "save-status ok";
       payStatus.textContent = "Сохранено";
-    } catch (e) {
+    } catch (err) {
       payStatus.className = "save-status err";
-      payStatus.textContent = e.message;
+      payStatus.textContent = err.message;
     }
   }
   form.addEventListener("change", savePayment);

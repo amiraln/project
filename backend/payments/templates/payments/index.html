@@ -1,4 +1,5 @@
 {% extends "payments/base.html" %}
+{% load l10n %}
 {% block title %}Табель · {{ group.name|default:"Все группы" }} · {{ month_label }}{% endblock %}
 
 {% block style %}
@@ -35,8 +36,37 @@
   .d.absent_reason{background:var(--orange-bg);color:var(--orange)}
   .d.weekend{background:var(--red-bg);color:var(--red)}
   .d.absent,.d.unknown{background:var(--soft)}
-  .d.empty{border:1px dashed var(--line)}
+  .d.empty{padding:0;border:1px dashed var(--line)}  /* .empty в base.html — пустое состояние страницы с большими отступами */
   .total{font-weight:700}
+
+  /* Оплата прямо в табеле и выбор детей для массовых действий */
+  .name-cell{display:flex;align-items:flex-start;gap:10px}
+  .name-cell input{margin-top:3px}
+  .badge-family{padding:0 7px;font-size:11px;vertical-align:1px}
+  .timesheet tbody tr.picked > td{background:var(--accent-soft)}
+  .timesheet tbody tr.saving{opacity:.55;pointer-events:none}
+  /* оплата всегда видна у правого края, как имя — у левого */
+  .col-pay{position:sticky;right:0;z-index:1;background:var(--card);box-shadow:-1px 0 0 var(--line)}
+  thead .col-pay{background:var(--soft)}
+  .pay-cell{display:flex;align-items:center;gap:6px}
+  .pay-method,.pay-amount{min-height:32px;padding:4px 8px}
+  .pay-method{cursor:pointer}
+  .pay-method[data-value=cash]{border-color:#86efac;background:var(--green-bg);color:var(--green);font-weight:600}
+  .pay-method[data-value=online]{border-color:#93c5fd;background:var(--blue-bg);color:var(--blue);font-weight:600}
+  .pay-amount{width:96px;text-align:right;font-variant-numeric:tabular-nums}
+  .pay-filter{min-height:38px}
+  .pay-summary{margin:-4px 0 12px;color:var(--muted);font-size:13px}
+  .pay-summary b{color:var(--text)}
+  .hint{margin-top:8px;color:var(--muted);font-size:12px}
+
+  .bulkbar{position:sticky;bottom:12px;z-index:15;display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;margin-top:12px;padding:12px 16px;
+    border:1px solid var(--accent);border-radius:var(--radius);background:var(--card);box-shadow:0 12px 32px rgba(16,24,40,.18)}
+  .bulkbar.saving{opacity:.6;pointer-events:none}
+  .bulk-group{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0}
+  .bulk-label{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .bulk-group input{width:120px;min-height:36px;text-align:right}
+  .bulk-count{display:flex;align-items:center;gap:10px}
+  .bulk-status{color:var(--green);font-size:13px}
 
   .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;color:var(--muted);font-size:12px}
   .legend span{display:inline-flex;align-items:center;gap:6px}
@@ -60,6 +90,12 @@
     .group-link{flex:none;padding:6px 12px;border:1px solid var(--line);border-radius:999px}
     .group-link[aria-current]{border-color:var(--accent)}
     .sheet{padding:12px 12px 40px}
+    .col-pay{position:static;box-shadow:none}
+    .bulkbar{bottom:0;gap:8px;padding:10px 12px;border-radius:var(--radius) var(--radius) 0 0}
+    .bulkbar .btn{min-height:32px;padding:0 10px}
+    .bulk-count{width:100%;justify-content:space-between}
+    #bulk-pay-label{display:none}
+    .bulk-group input{width:96px;min-height:32px}
   }
 </style>
 {% endblock %}
@@ -116,6 +152,11 @@
     {% else %}
     <div class="toolbar">
       <input class="search" type="search" id="search" placeholder="Поиск по ФИО, ИИН или группе" aria-label="Поиск по ФИО, ИИН или группе" autocomplete="off">
+      <select class="pay-filter" id="pay-filter" aria-label="Показать детей по оплате">
+        <option value="all">Оплата: все</option>
+        <option value="">Оплата не отмечена</option>
+        {% for value, label in pay_methods %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
       <span class="count" aria-live="polite">Детей: <b id="shown">{{ records|length }}</b></span>
       <div class="toolbar-end">
         {% if group %}<a class="btn" href="{% url 'payments:print_group' group.gid %}?month={{ month }}" target="_blank">Печать группы</a>{% endif %}
@@ -123,33 +164,48 @@
       </div>
     </div>
 
+    <p class="pay-summary" id="pay-summary"></p>
+
     <div class="card table-card">
       <table class="data timesheet" id="timesheet">
         <thead>
           <tr>
-            <th class="col-name">Ребёнок</th>
+            <th class="col-name"><span class="name-cell"><input type="checkbox" id="pick-all" aria-label="Выбрать всех детей в списке" title="Выбрать всех в списке">Ребёнок</span></th>
             {% if not group %}<th>Группа</th>{% endif %}
             <th><div class="days days-head" aria-label="Дни месяца">{% for n in day_nums %}<span>{{ n }}</span>{% endfor %}</div></th>
             <th class="num">Отпуск</th>
             <th class="num">Больн.</th>
-            <th class="num" title="Оплата, внесённая в прошлом месяце">Прошлый мес.</th>
             <th class="num">Ежемес.</th>
             <th class="num">Итого</th>
             <th class="num">Переплата</th>
+            <th class="col-pay" title="Способ оплаты и сумма, внесённая в прошлом месяце">Оплата · внесено, ₸</th>
           </tr>
         </thead>
         <tbody>
           {% for r in records %}
-          <tr data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}">
-            <td class="col-name"><a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ month }}">{{ r.fio }}</a><span class="sub">{{ r.iin }}{% if r.iin and r.age %} · {% endif %}{{ r.age }}</span></td>
+          <tr data-search="{{ r.fio|lower }} {{ r.iin }} {{ r.group|lower }}" data-pid="{{ r.pId }}" data-method="{{ r.method }}" data-paid="{{ r.last_payment|unlocalize }}"{% if r.large_family %} data-large{% endif %}>
+            <td class="col-name">
+              <div class="name-cell">
+                <input type="checkbox" class="pick" aria-label="Выбрать: {{ r.fio }}">
+                <div><a class="name-link" href="{% url 'payments:child_detail' r.pId %}?month={{ month }}">{{ r.fio }}</a><span class="sub">{{ r.iin }}{% if r.iin and r.age %} · {% endif %}{{ r.age }}{% if r.large_family %} <span class="badge badge-family" title="Многодетная семья: ежемесячная по умолчанию {{ large_family_monthly|floatformat:'0g' }} ₸">многодетная</span>{% endif %}</span></div>
+              </div>
+            </td>
             {% if not group %}<td><span class="group-cell" title="{{ r.group }}">{{ r.group }}</span></td>{% endif %}
             <td><div class="days">{% for d in r.days %}<span class="d {{ d.type }}" title="{{ d.num }}{% if d.label %}: {{ d.label }}{% elif d.type == 'present' %}: присутствовал{% elif d.type == 'weekend' %}: выходной{% endif %}">{{ d.ct }}</span>{% endfor %}</div></td>
             <td class="num">{% if r.vacation_days %}<span class="badge badge-orange">{{ r.vacation_days }}</span>{% else %}<span class="zero">0</span>{% endif %}</td>
             <td class="num">{% if r.sick_days %}<span class="badge badge-orange">{{ r.sick_days }}</span>{% else %}<span class="zero">0</span>{% endif %}</td>
-            <td class="num{% if not r.last_payment %} zero{% endif %}">{{ r.last_payment|floatformat:"0g" }}</td>
-            <td class="num">{{ r.monthly|floatformat:"0g" }}</td>
-            <td class="num total">{{ r.total|floatformat:"0g" }}</td>
-            <td class="num {% if r.overpay < 0 %}neg{% else %}pos{% endif %}">{{ r.overpay|floatformat:"0g" }}</td>
+            <td class="num" data-cell="monthly" title="{% if not r.monthly_default %}Задана вручную{% elif r.large_family %}По умолчанию: многодетная семья{% else %}По умолчанию{% endif %}">{{ r.monthly|floatformat:"0g" }}</td>
+            <td class="num total" data-cell="total">{{ r.total|floatformat:"0g" }}</td>
+            <td class="num {% if r.overpay < 0 %}neg{% else %}pos{% endif %}" data-cell="overpay">{{ r.overpay|floatformat:"0g" }}</td>
+            <td class="col-pay">
+              <div class="pay-cell">
+                <select class="pay-method" data-value="{{ r.method }}" aria-label="Способ оплаты: {{ r.fio }}">
+                  <option value="">—</option>
+                  {% for value, label in pay_methods %}<option value="{{ value }}"{% if value == r.method %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+                <input class="pay-amount" type="text" inputmode="decimal" value="{{ r.last_payment|floatformat:'0' }}" aria-label="Внесено, ₸: {{ r.fio }}" autocomplete="off">
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -162,6 +218,29 @@
       <span><i class="d weekend"></i>выходной</span>
       <span><i class="d absent"></i>отсутствовал</span>
       <span><i class="d empty"></i>нет отметки</span>
+    </div>
+    <p class="hint">
+      Ежемесячная оплата по умолчанию — {{ default_monthly|floatformat:"0g" }} ₸, для многодетной семьи — {{ large_family_monthly|floatformat:"0g" }} ₸
+      (многодетная — если в табеле за месяц есть ещё ребёнок того же родителя). «Наличные» или «Онлайн» без суммы записывают сумму к оплате (Итого),
+      «—» снимает отметку и обнуляет внесённое. Выберите детей галочками, чтобы отметить оплату или изменить ежемесячную сумму сразу у всех.
+    </p>
+
+    <div class="bulkbar" id="bulkbar" role="region" aria-label="Действия с выбранными детьми" hidden>
+      <div class="bulk-count">
+        <span>Выбрано: <b id="picked">0</b> <span class="bulk-status" id="bulk-status" aria-live="polite"></span></span>
+        <button type="button" class="btn" id="bulk-cancel">Снять выбор</button>
+      </div>
+      <div class="bulk-group" role="group" aria-labelledby="bulk-pay-label">
+        <span class="bulk-label" id="bulk-pay-label">Оплата</span>
+        {% for value, label in pay_methods %}<button type="button" class="btn" data-bulk-method="{{ value }}">{{ label }}</button>{% endfor %}
+        <button type="button" class="btn btn-danger" data-bulk-method="">Снять отметку</button>
+      </div>
+      <form class="bulk-group" id="bulk-monthly">
+        <label class="bulk-label" for="bulk-monthly-sum">Ежемесячная, ₸</label>
+        <input type="text" inputmode="decimal" id="bulk-monthly-sum" autocomplete="off" required>
+        <button type="submit" class="btn btn-primary">Применить</button>
+        <button type="button" class="btn" id="bulk-monthly-default" title="{{ large_family_monthly|floatformat:'0g' }} ₸ многодетной семье, {{ default_monthly|floatformat:'0g' }} ₸ остальным">По умолчанию</button>
+      </form>
     </div>
     {% endif %}
   </section>
@@ -209,7 +288,6 @@
   // Окно e-orda сообщает о сохранённых данных — показываем их без ручного обновления
   if ("BroadcastChannel" in window) new BroadcastChannel("payments").onmessage = () => location.reload();
 
-  searchList("#timesheet tbody tr");
   document.getElementById("clear-month")?.addEventListener("click", async () => {
     if (!confirm("Удалить табель за {{ month_label }}? Отметки и оплаты, внесённые вручную за этот месяц, тоже удалятся.")) return;
     try {
@@ -219,5 +297,148 @@
       alert(e.message);
     }
   });
+
+  // ---------- оплата в строках табеля ----------
+  const MONTH = "{{ month }}";
+  const rows = [...document.querySelectorAll("#timesheet tbody tr")];
+  const rowByPid = new Map(rows.map((row) => [row.dataset.pid, row]));
+  const payFilter = document.getElementById("pay-filter");
+  const summary = document.getElementById("pay-summary");
+  const refilter = searchList("#timesheet tbody tr", (row) => payFilter.value === "all" || row.dataset.method === payFilter.value, updatePicked);
+  payFilter?.addEventListener("change", refilter);
+
+  function showSummary() {
+    if (!summary) return;
+    const sums = {cash: {n: 0, sum: 0}, online: {n: 0, sum: 0}};
+    for (const row of rows) {
+      const s = sums[row.dataset.method];
+      if (s) {
+        s.n += 1;
+        s.sum += Number(row.dataset.paid);
+      }
+    }
+    summary.innerHTML = "Оплата отмечена: <b></b> из " + rows.length + " · наличными: <b></b> · онлайн: <b></b>";
+    const [marked, cash, online] = summary.querySelectorAll("b");
+    marked.textContent = sums.cash.n + sums.online.n;
+    cash.textContent = sums.cash.n + " — " + money(sums.cash.sum) + " ₸";
+    online.textContent = sums.online.n + " — " + money(sums.online.sum) + " ₸";
+  }
+
+  // Строка после сохранения; в data-* — сохранённое состояние, к нему строка возвращается при ошибке
+  function showRow(row, t) {
+    row.dataset.method = t.method;
+    row.dataset.paid = t.last_payment;
+    const select = row.querySelector(".pay-method");
+    select.value = select.dataset.value = t.method;
+    row.querySelector(".pay-amount").value = Math.round(t.last_payment);
+    const monthly = row.querySelector("[data-cell=monthly]");
+    monthly.textContent = money(t.monthly);
+    monthly.title = !t.monthly_default ? "Задана вручную" : "large" in row.dataset ? "По умолчанию: многодетная семья" : "По умолчанию";
+    row.querySelector("[data-cell=total]").textContent = money(t.total);
+    const overpay = row.querySelector("[data-cell=overpay]");
+    overpay.textContent = money(t.overpay);
+    overpay.className = "num " + (t.overpay < 0 ? "neg" : "pos");
+  }
+
+  function restoreRow(row) {
+    const select = row.querySelector(".pay-method");
+    select.value = select.dataset.value = row.dataset.method;
+    row.querySelector(".pay-amount").value = Math.round(row.dataset.paid);
+  }
+
+  async function savePayment(row, change) {
+    row.classList.add("saving");
+    try {
+      const res = await postJSON("{% url 'payments:save_payment' %}", {pId: Number(row.dataset.pid), month: MONTH, ...change});
+      showRow(row, res.totals);
+    } catch (e) {
+      restoreRow(row);
+      alert(e.message);
+    }
+    row.classList.remove("saving");
+    showSummary();
+  }
+
+  const tbody = document.querySelector("#timesheet tbody");
+  tbody?.addEventListener("change", (e) => {
+    const row = e.target.closest("tr");
+    if (e.target.matches(".pay-method")) savePayment(row, {method: e.target.value});
+    else if (e.target.matches(".pay-amount")) savePayment(row, {last_payment: e.target.value});
+    else if (e.target.matches(".pick")) updatePicked();
+  });
+  tbody?.addEventListener("keydown", (e) => e.key === "Enter" && e.target.matches(".pay-amount") && e.target.blur());  // blur вызовет change
+
+  // ---------- выбор детей и массовые действия ----------
+  const bar = document.getElementById("bulkbar");
+  const pickAll = document.getElementById("pick-all");
+  const bulkStatus = document.getElementById("bulk-status");
+  const visible = () => rows.filter((row) => !row.hidden);
+  const picked = () => visible().filter((row) => row.querySelector(".pick").checked);
+  const children = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? " ребёнка" : " детей");
+
+  function updatePicked() {
+    for (const row of rows) {
+      const box = row.querySelector(".pick");
+      if (row.hidden) box.checked = false;  // скрытые поиском или фильтром не меняются
+      row.classList.toggle("picked", box.checked);
+    }
+    const n = picked().length;
+    const all = visible().length;
+    if (pickAll) {
+      pickAll.checked = n > 0 && n === all;
+      pickAll.indeterminate = n > 0 && n < all;
+    }
+    if (bar) bar.hidden = n === 0;
+    if (bulkStatus) bulkStatus.textContent = "";
+    const counter = document.getElementById("picked");
+    if (counter) counter.textContent = n;
+  }
+
+  pickAll?.addEventListener("change", () => {
+    for (const row of visible()) row.querySelector(".pick").checked = pickAll.checked;
+    updatePicked();
+  });
+  document.getElementById("bulk-cancel")?.addEventListener("click", () => {
+    for (const row of rows) row.querySelector(".pick").checked = false;
+    updatePicked();
+  });
+
+  async function bulk(change, question) {
+    const chosen = picked();
+    if (!chosen.length || !confirm(question(chosen.length))) return;
+    bar.classList.add("saving");
+    bulkStatus.textContent = "";
+    try {
+      const res = await postJSON("{% url 'payments:bulk_payment' %}", {month: MONTH, pIds: chosen.map((row) => Number(row.dataset.pid)), ...change});
+      for (const t of res.rows) showRow(rowByPid.get(String(t.pId)), t);
+      bulkStatus.textContent = "· сохранено";
+    } catch (e) {
+      alert(e.message);
+    }
+    bar.classList.remove("saving");
+    showSummary();
+  }
+
+  for (const button of document.querySelectorAll("[data-bulk-method]")) {
+    button.addEventListener("click", () => {
+      const method = button.dataset.bulkMethod;
+      bulk({method}, (n) => method
+        ? `Отметить оплату «${button.textContent}» у ${children(n)} за {{ month_label }}? Где сумма не внесена, запишется сумма к оплате.`
+        : `Снять отметку об оплате у ${children(n)} за {{ month_label }}? Внесённые суммы обнулятся.`);
+    });
+  }
+  const monthlyForm = document.getElementById("bulk-monthly");
+  monthlyForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const value = document.getElementById("bulk-monthly-sum").value.trim();
+    bulk({monthly: value}, (n) => `Ежемесячная оплата ${value} ₸ у ${children(n)} за {{ month_label }}?`);
+  });
+  document.getElementById("bulk-monthly-default")?.addEventListener("click", () => {
+    bulk({monthly: ""}, (n) => `Вернуть ежемесячную оплату по умолчанию у ${children(n)} за {{ month_label }}? `
+      + "{{ large_family_monthly|floatformat:'0g' }} ₸ — многодетной семье, {{ default_monthly|floatformat:'0g' }} ₸ — остальным.");
+  });
+
+  showSummary();
+  updatePicked();
 </script>
 {% endblock %}

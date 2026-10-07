@@ -16,9 +16,9 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 @admin.register(Child)
 class ChildAdmin(admin.ModelAdmin):
-    list_display = ("fio", "group_name", "iin", "contract_number", "contract_date", "last_month", "is_active")
-    list_editable = ("is_active",)
-    list_filter = ("is_active", "group_name")
+    list_display = ("fio", "group_name", "iin", "contract_number", "contract_date", "last_month", "is_active", "large_family")
+    list_editable = ("is_active", "large_family")
+    list_filter = ("is_active", "large_family", "group_name")
     search_fields = ("fio", "iin", "contract_number", "address")
     readonly_fields = ("p_id", "last_month")
 
@@ -35,9 +35,14 @@ class ChildRecordAdmin(admin.ModelAdmin):
 
 @admin.register(PaymentInfo)
 class PaymentInfoAdmin(admin.ModelAdmin):
-    list_display = ("child", "last_payment", "monthly_payment")
+    list_display = ("child", "last_payment", "method", "monthly")
+    list_filter = ("method",)
     search_fields = ("child__fio", "child__iin")
     list_select_related = ("child",)
+
+    @admin.display(description="Ежемесячная оплата", ordering="monthly_payment")
+    def monthly(self, obj):
+        return "по умолчанию" if obj.monthly_payment is None else obj.monthly_payment
 
 
 @admin.register(ChangeLog)

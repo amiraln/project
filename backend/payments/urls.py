@@ -15,6 +15,7 @@ urlpatterns = [
     path("logout/", views.logout_view, name="logout"),
     # для страниц раздела
     path("api/payment/", views.save_payment, name="save_payment"),
+    path("api/payment/bulk/", views.bulk_payment, name="bulk_payment"),
     path("api/absence/", views.save_absence, name="save_absence"),
     path("api/clear/", views.clear_data, name="clear_data"),
     # закладки на e-orda: окно-приёмник и куда оно сохраняет данные

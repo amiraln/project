@@ -9,9 +9,10 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.core.management.color import no_style
 from django.db import connection, transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from payments.models import ChangeLog, ChildRecord, Guardian, PaymentImport, PaymentInfo, sync_children
+from payments.models import ChangeLog, ChildRecord, Guardian, PaymentImport, PaymentInfo, keep_old_monthly, sync_children
 
 # Порядок важен: сначала дети, на них ссылаются оплаты и квитанции
 MODELS = [ChildRecord, PaymentInfo, ChangeLog, PaymentImport, Guardian]
@@ -85,6 +86,7 @@ class Command(BaseCommand):
                     cursor.execute(sql)
 
             sync_children()  # воспитанники для медицинских журналов
+            keep_old_monthly(timezone.localdate().strftime("%Y-%m"))  # прошлые месяцы — по прежней сумме
 
         src.close()
         self.stdout.write(self.style.SUCCESS("Готово. Данные табеля перенесены."))

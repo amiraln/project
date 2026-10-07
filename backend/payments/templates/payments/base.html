@@ -13,6 +13,7 @@
     --text:#17252c;--muted:#5b696f;--faint:#a9b4b1;
     --accent:#2e6b4f;--accent-dark:#1f4d38;--accent-soft:#e3efe8;
     --green:#15803d;--green-bg:#dcfce7;--orange:#c2410c;--orange-bg:#ffedd5;--red:#b91c1c;--red-bg:#fee2e2;
+    --blue:#1d4ed8;--blue-bg:#dbeafe;--violet:#6d28d9;--violet-bg:#ede9fe;
     --focus:#1b5fbf;--radius:12px;--shadow:0 1px 2px rgba(16,24,40,.06);
   }
   *{box-sizing:border-box}
@@ -93,6 +94,7 @@
   .badge-orange{background:var(--orange-bg);color:var(--orange)}
   .badge-green{background:var(--green-bg);color:var(--green)}
   .badge-red{background:var(--red-bg);color:var(--red)}
+  .badge-family{background:var(--violet-bg);color:var(--violet)}
 
   /* Поля ввода */
   input,select,textarea{max-width:100%;padding:8px 10px;border:1px solid #cdd6d2;border-radius:9px;background:var(--card);color:var(--text);font:inherit}
@@ -160,21 +162,25 @@
   }
   const money = (value) => Math.round(value).toLocaleString("ru-RU");
 
-  // Поиск по списку: у элементов атрибут data-search; счётчик #shown, пустое состояние #no-results
-  function searchList(selector) {
+  // Поиск по списку: у элементов атрибут data-search; счётчик #shown, пустое состояние #no-results.
+  // match — дополнительный фильтр, after — вызывается после отбора. Возвращает функцию «отобрать заново».
+  function searchList(selector, match = () => true, after = () => {}) {
     const search = document.getElementById("search");
-    if (!search) return;
+    if (!search) return () => {};
     const items = [...document.querySelectorAll(selector)];
-    search.addEventListener("input", () => {
+    function filter() {
       const query = search.value.trim().toLowerCase();
       let shown = 0;
       for (const item of items) {
-        item.hidden = !item.dataset.search.includes(query);
+        item.hidden = !(item.dataset.search.includes(query) && match(item));
         shown += !item.hidden;
       }
       document.getElementById("shown").textContent = shown;
       document.getElementById("no-results").hidden = shown > 0;
-    });
+      after();
+    }
+    search.addEventListener("input", filter);
+    return filter;
   }
 </script>
 {% block scripts %}{% endblock %}
