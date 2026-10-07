@@ -69,8 +69,21 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          # Ключ, вставленный из Windows, приходит с \r, пробелами или в одну строку — собираем его заново
+          key=$(printf '%s' "$DEPLOY_SSH_KEY" | tr -d '\r')
+          if printf '%s' "$key" | grep -q 'BEGIN OPENSSH PRIVATE KEY'; then
+            body=$(printf '%s' "$key" | sed -e 's/-----BEGIN OPENSSH PRIVATE KEY-----//' -e 's/-----END OPENSSH PRIVATE KEY-----//' | tr -d ' \t\n')
+            { echo "-----BEGIN OPENSSH PRIVATE KEY-----"; printf '%s\n' "$body" | fold -w 70; echo "-----END OPENSSH PRIVATE KEY-----"; } > ~/.ssh/deploy
+          else
+            printf '%s\n' "$key" > ~/.ssh/deploy
+          fi
           chmod 600 ~/.ssh/deploy
+          if ! ssh-keygen -y -P "" -f ~/.ssh/deploy > ~/.ssh/deploy.pub; then
+            echo "::error::DEPLOY_SSH_KEY — не закрытый ключ без пароля. Вставьте весь файл botakanym_deploy (не .pub), от -----BEGIN до -----END"
+            exit 1
+          fi
+          echo "Отпечаток ключа из DEPLOY_SSH_KEY (сравните: ssh-keygen -lf botakanym_deploy.pub):"
+          ssh-keygen -lf ~/.ssh/deploy.pub
           ssh-keyscan -T 15 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
           SSH="ssh -i $HOME/.ssh/deploy -o BatchMode=yes ubuntu@$DEPLOY_HOST"
           scp -i ~/.ssh/deploy -o BatchMode=yes botakanym-deploy.tar.gz "ubuntu@$DEPLOY_HOST:/tmp/"
