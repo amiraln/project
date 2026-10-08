@@ -91,7 +91,7 @@ function Fact({ label, children }) {
 }
 
 export function PeopleList({ kind }) {
-  const { t, tr, years } = useLang();
+  const { t, tr, years, fmtDate } = useLang();
   const state = useApi(`/people/?kind=${kind}`);
   return (
     <Async state={state} empty={t("notFilled")}>
@@ -111,8 +111,16 @@ export function PeopleList({ kind }) {
                 <p className="person-position">{tr(p, "position")}</p>
                 <dl className="facts">
                   <Fact label={t("educationLabel")}>{tr(p, "education")}</Fact>
+                  <Fact label={t("specialty")}>{tr(p, "specialty")}</Fact>
+                  <Fact label={t("retraining")}>
+                    {[tr(p, "retraining_place"), p.retraining_date && fmtDate(p.retraining_date)].filter(Boolean).join(", ")}
+                  </Fact>
                   <Fact label={t("qualification")}>{tr(p, "qualification")}</Fact>
+                  <Fact label={t("qualificationYear")}>{p.qualification_year}</Fact>
                   <Fact label={t("experience")}>{p.experience_years != null && years(p.experience_years)}</Fact>
+                  <Fact label={t("positionExperience")}>
+                    {p.position_experience_years != null && years(p.position_experience_years)}
+                  </Fact>
                   <Fact label={t("reception")}>{tr(p, "reception")}</Fact>
                   <Fact label={t("phone")}>{p.phone && <a href={telHref(p.phone)}>{p.phone}</a>}</Fact>
                   <Fact label={t("email")}>{p.email && <a href={`mailto:${p.email}`}>{p.email}</a>}</Fact>

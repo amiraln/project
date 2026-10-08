@@ -47,7 +47,24 @@ class PersonAdmin(admin.ModelAdmin):
     list_display = ["full_name", "position_ru", "kind", "is_published", "order"]
     list_filter = ["kind", "is_published"]
     list_editable = ["is_published", "order"]
-    search_fields = ["full_name", "position_ru"]
+    search_fields = ["last_name", "first_name", "middle_name", "position_ru"]
+    fieldsets = [
+        (None, {"fields": ["kind", ("last_name", "first_name", "middle_name"), "position_kk", "position_ru"]}),
+        ("Фото", {"fields": ["photo", "show_photo"]}),
+        ("Образование", {"fields": ["education_kk", "education_ru", "specialty_kk", "specialty_ru"]}),
+        ("Сертификат о переподготовке по профилю", {"fields": ["retraining_date", "retraining_place_kk", "retraining_place_ru"]}),
+        ("Квалификация", {"fields": ["qualification_kk", "qualification_ru", "qualification_year"]}),
+        ("Стаж", {"fields": ["experience_years", "position_experience_years"]}),
+        ("Контакты (для руководства)", {"fields": ["reception_kk", "reception_ru", "phone", "email"], "classes": ["collapse"]}),
+        ("На сайте", {"fields": ["is_published", "order"]}),
+    ]
+
+    @admin.display(description="ФИО", ordering="last_name")
+    def full_name(self, obj):
+        return obj.full_name
+
+    def get_changeform_initial_data(self, request):
+        return {"kind": "teacher", **super().get_changeform_initial_data(request)}  # чаще всего вносят педагогов
 
 
 @admin.register(Document)
