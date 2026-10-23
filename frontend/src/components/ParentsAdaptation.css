@@ -1,0 +1,289 @@
+/* Блок «Как подготовить ребёнка к детскому саду». Все классы начинаются с .pa-, чтобы не пересекаться со стилями сайта.
+   Палитра и формы — как у «Документов для зачисления» (ParentsDocuments.css). */
+.pa {
+  --pa-ink: #3a2412;
+  --pa-muted: #6e5846;
+  --pa-line: #eee2cf;
+  --pa-card: #fff;
+  --pa-orange: #e98a2b;
+  --pa-orange-soft: #fff2e0;
+  --pa-orange-deep: #a3520c;
+  --pa-sky: #2a6fae;
+  --pa-sky-soft: #e4f0fb;
+  --pa-sky-text: #1f5c94;
+
+  margin-top: 56px;
+  color: var(--pa-ink);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.pa *,
+.pa *::before,
+.pa *::after { box-sizing: border-box; }
+.pa :where(p, h2, h3, h4, blockquote) { margin: 0; color: inherit; }
+
+/* ---------- Шапка ---------- */
+.pa-hero {
+  padding: 32px 36px;
+  border: 1.5px solid var(--pa-line);
+  border-radius: 28px;
+  background: var(--pa-card);
+}
+.pa-hero__title {
+  font-size: clamp(1.6rem, 1.05rem + 2.2vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.pa-hero__lead {
+  max-width: 36em;
+  margin-top: 14px;
+  color: var(--pa-muted);
+  font-size: 1.08rem;
+}
+
+/* ---------- Этапы: линия времени ---------- */
+.pa-steps {
+  margin: 36px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pa-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 18px;
+  padding-bottom: 18px;
+}
+/* пунктир от номера к следующему этапу */
+.pa-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 54px;
+  bottom: 0;
+  left: 26px;
+  border-left: 2px dashed var(--pa-line);
+}
+.pa-step__num {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 17px;
+  background: var(--pa-orange-soft);
+  color: var(--pa-orange-deep);
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pa-card {
+  min-width: 0;
+  border: 1.5px solid var(--pa-line);
+  border-radius: 22px;
+  background: var(--pa-card);
+}
+.pa-card__head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 18px 60px 18px 24px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 22px;
+}
+.pa-card__head::-webkit-details-marker { display: none; }
+.pa-card__head:focus-visible { outline: 3px solid var(--focus, var(--pa-sky)); outline-offset: 2px; }
+
+.pa-when {
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: var(--pa-sky-soft);
+  color: var(--pa-sky-text);
+  font-size: 0.88rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.pa-card__title {
+  flex: 1 1 100%;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.pa-stay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pa-muted);
+  font-size: 0.93rem;
+  font-weight: 700;
+}
+.pa-stay .pa-icon { flex: none; width: 17px; height: 17px; color: var(--pa-orange-deep); }
+/* «когда» и время в саду — одной строкой над заголовком */
+.pa-card__head .pa-when { order: 0; }
+.pa-card__head .pa-stay { order: 1; }
+.pa-card__head .pa-card__title { order: 2; }
+
+.pa-card__chevron {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-top: -15px;
+  border-radius: 999px;
+  background: var(--pa-orange-soft);
+  color: var(--pa-orange-deep);
+  transition: transform 0.2s ease;
+}
+.pa-card__chevron .pa-icon { width: 18px; height: 18px; stroke-width: 2.2; }
+.pa-card[open] .pa-card__chevron { transform: rotate(180deg); }
+
+.pa-tips {
+  margin: 0;
+  padding: 0 24px 22px;
+  list-style: none;
+}
+.pa-tips li {
+  position: relative;
+  padding: 10px 0 0 22px;
+}
+.pa-tips li + li { border-top: 0; }
+.pa-tips li::before {
+  content: '';
+  position: absolute;
+  top: calc(10px + 0.6em);
+  left: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--pa-orange);
+}
+.pa-card[open] .pa-tips { border-top: 2px dashed var(--pa-line); padding-top: 6px; margin: 0 0 0; }
+
+.pa-quote {
+  margin-top: 10px !important;
+  padding: 12px 16px;
+  border-left: 4px solid var(--pa-sky);
+  border-radius: 4px 14px 14px 4px;
+  background: var(--pa-sky-soft);
+  color: var(--pa-sky-text);
+  font-style: italic;
+  font-weight: 600;
+}
+
+/* ---------- Важные замечания ---------- */
+.pa-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 26px;
+}
+.pa-note {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 22px;
+  background: var(--pa-sky-soft);
+}
+.pa-note--break { background: var(--pa-orange-soft); }
+.pa-note__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--pa-card);
+  color: var(--pa-sky);
+}
+.pa-note--break .pa-note__icon { color: var(--pa-orange-deep); }
+.pa-note__icon .pa-icon { width: 24px; height: 24px; }
+.pa-note__title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+.pa-note__text { margin-top: 6px; }
+
+.pa-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 26px;
+  padding: 18px 22px;
+  border: 1.5px solid var(--pa-line);
+  border-radius: 20px;
+  background: var(--pa-card);
+  font-weight: 700;
+}
+.pa-footer .pa-icon { flex: none; width: 26px; height: 26px; color: var(--pa-orange-deep); }
+.pa-source {
+  margin: 10px 6px 0 !important;
+  color: var(--pa-muted);
+  font-size: 0.88rem;
+}
+
+.pa-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-card__chevron { transition: none; }
+}
+
+/* ---------- Телефоны ---------- */
+@media (max-width: 640px) {
+  .pa { margin-top: 44px; }
+  .pa-hero { padding: 26px 20px 30px; border-radius: 22px; }
+  .pa-steps { margin-top: 28px; }
+  .pa-step { grid-template-columns: 38px 1fr; gap: 10px; padding-bottom: 14px; }
+  .pa-step:not(:last-child)::before { top: 38px; left: 18px; }
+  .pa-step__num { width: 38px; height: 38px; border-radius: 12px; font-size: 1.05rem; }
+  .pa-card { border-radius: 18px; }
+  .pa-card__head { padding: 14px 50px 14px 16px; border-radius: 18px; }
+  .pa-card__title { font-size: 1.08rem; }
+  .pa-card__chevron { right: 12px; }
+  .pa-tips { padding: 0 16px 18px; }
+  .pa-notes { grid-template-columns: 1fr; gap: 14px; }
+  .pa-note { padding: 18px; }
+  .pa-footer { padding: 16px 18px; }
+}
+
+/* ---------- Печать: всё раскрыто, без стрелок ---------- */
+@media print {
+  .pa-card__chevron { display: none; }
+}
+
+/* ---------- Версия для слабовидящих ---------- */
+/* Контрастные схемы: цвета берутся из схемы сайта, мягкие заливки заменяются рамками */
+html[data-scheme] .pa {
+  --pa-ink: var(--ink);
+  --pa-muted: var(--ink);
+  --pa-line: var(--ink);
+  --pa-card: var(--paper);
+  --pa-orange: var(--ink);
+  --pa-orange-soft: var(--paper);
+  --pa-orange-deep: var(--ink);
+  --pa-sky: var(--ink);
+  --pa-sky-soft: var(--paper);
+  --pa-sky-text: var(--ink);
+}
+html[data-scheme] .pa-step__num,
+html[data-scheme] .pa-when,
+html[data-scheme] .pa-card__chevron,
+html[data-scheme] .pa-note,
+html[data-scheme] .pa-note__icon,
+html[data-scheme] .pa-quote { border: 2px solid var(--ink); }

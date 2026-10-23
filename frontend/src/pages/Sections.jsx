@@ -4,6 +4,7 @@ import { useLang } from "../i18n.jsx";
 import { Async, RichText, TextSection } from "../components/ui.jsx";
 import { PeopleList, SectionPage } from "../components/content.jsx";
 import ParentsDocuments from "../components/ParentsDocuments.jsx";
+import ParentsAdaptation from "../components/ParentsAdaptation.jsx";
 
 export function About() {
   const { t, tr } = useLang();
@@ -65,6 +66,8 @@ export function Parents({ embedded = false, children }) {
     <SectionPage slug="parents" docs={["admission", "contract", "payment"]} faq="parents" embedded={embedded}>
       {children}
       <ParentsDocuments lang={lang} headingLevel={embedded ? 3 : 2} />
+      {/* Рекомендации по адаптации: на главной этапы свёрнуты, на странице «Родителям» — раскрыты */}
+      <ParentsAdaptation lang={lang} headingLevel={embedded ? 3 : 2} collapsed={embedded} />
     </SectionPage>
   );
 }
