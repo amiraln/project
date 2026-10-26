@@ -1,7 +1,7 @@
 from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError
-from django.core.validators import FileExtensionValidator
+from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.deconstruct import deconstructible
@@ -137,17 +137,34 @@ class Group(Ordered):
 
 
 class Person(Ordered):
+    """Карточка сотрудника на страницах «Руководство» и «Педагоги»."""
+
     KIND_CHOICES = [("leader", "Руководство"), ("teacher", "Педагог / специалист")]
 
     kind = models.CharField("Раздел", max_length=10, choices=KIND_CHOICES)
-    full_name = models.CharField("ФИО", max_length=255)
+    last_name = models.CharField("Фамилия", max_length=100)
+    first_name = models.CharField("Имя", max_length=100)
+    middle_name = models.CharField("Отчество", max_length=100, blank=True)
     position_kk = models.CharField("Должность (қаз.)", max_length=255)
     position_ru = models.CharField("Должность (рус.)", max_length=255)
-    education_kk = models.CharField("Образование (қаз.)", max_length=500, blank=True)
-    education_ru = models.CharField("Образование (рус.)", max_length=500, blank=True)
-    qualification_kk = models.CharField("Квалификация / категория (қаз.)", max_length=255, blank=True)
-    qualification_ru = models.CharField("Квалификация / категория (рус.)", max_length=255, blank=True)
-    experience_years = models.PositiveSmallIntegerField("Педагогический стаж, лет", null=True, blank=True)
+    education_kk = models.CharField("Учебное заведение (қаз.)", max_length=500, blank=True,
+                                    help_text="Где получено образование, например: КазНПУ им. Абая, 2012")
+    education_ru = models.CharField("Учебное заведение (рус.)", max_length=500, blank=True,
+                                    help_text="Где получено образование, например: КазНПУ им. Абая, 2012")
+    specialty_kk = models.CharField("Специальность (қаз.)", max_length=255, blank=True)
+    specialty_ru = models.CharField("Специальность (рус.)", max_length=255, blank=True)
+    retraining_date = models.DateField("Дата сертификата", null=True, blank=True)
+    retraining_place_kk = models.CharField("Где пройдена (қаз.)", max_length=255, blank=True)
+    retraining_place_ru = models.CharField("Где пройдена (рус.)", max_length=255, blank=True)
+    qualification_kk = models.CharField("Квалификация (қаз.)", max_length=255, blank=True,
+                                        help_text="Название квалификации, например: педагог-модератор")
+    qualification_ru = models.CharField("Квалификация (рус.)", max_length=255, blank=True,
+                                        help_text="Название квалификации, например: педагог-модератор")
+    qualification_year = models.PositiveSmallIntegerField("Год присвоения квалификации", null=True, blank=True,
+                                                          validators=[MinValueValidator(1950)])
+    experience_years = models.PositiveSmallIntegerField("Общий педагогический стаж, лет", null=True, blank=True)
+    position_experience_years = models.PositiveSmallIntegerField("Стаж по занимаемой должности, лет",
+                                                                 null=True, blank=True)
     reception_kk = models.CharField("Часы приёма (қаз.)", max_length=255, blank=True)
     reception_ru = models.CharField("Часы приёма (рус.)", max_length=255, blank=True)
     phone = models.CharField("Рабочий телефон", max_length=50, blank=True)
@@ -163,6 +180,26 @@ class Person(Ordered):
 
     def __str__(self):
         return self.full_name
+
+    @property
+    def full_name(self):
+        return " ".join(filter(None, [self.last_name, self.first_name, self.middle_name]))
+
+    def clean(self):
+        errors = {}
+        today = timezone.localdate()
+        if self.qualification_year:
+            if self.qualification_year > today.year:
+                errors["qualification_year"] = "Год ещё не наступил."
+            elif not (self.qualification_kk or self.qualification_ru):
+                errors["qualification_year"] = "Укажите и название квалификации."
+        if self.retraining_date and self.retraining_date > today:
+            errors["retraining_date"] = "Дата ещё не наступила."
+        if (self.experience_years is not None and self.position_experience_years is not None
+                and self.position_experience_years > self.experience_years):
+            errors["position_experience_years"] = "Не может быть больше общего педагогического стажа."
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         process_image(self.photo)

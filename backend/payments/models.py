@@ -1,9 +1,19 @@
 """Табель посещаемости и оплаты (перенесено из отдельной системы timesheet_project)."""
+import re
+from collections import defaultdict
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
-DEFAULT_MONTHLY = 51000  # ежемесячная оплата по умолчанию, ₸
+# Ежемесячная оплата по умолчанию, ₸
+DEFAULT_MONTHLY = 60000
+LARGE_FAMILY_MONTHLY = 51000  # многодетная семья
+OLD_DEFAULT_MONTHLY = 51000  # по умолчанию до появления многодетных семей — так считаны прошлые месяцы
+
+
+def default_monthly(large_family):
+    return LARGE_FAMILY_MONTHLY if large_family else DEFAULT_MONTHLY
 
 
 class ChildRecord(models.Model):
@@ -48,6 +58,11 @@ class Child(models.Model):
     contract_number = models.CharField("Номер договора", max_length=60, blank=True)
     contract_date = models.DateField("Дата подписания договора", null=True, blank=True,
                                      help_text="Она же дата зачисления в медицинских журналах.")
+    large_family = models.BooleanField(
+        "Многодетная семья", default=False,
+        help_text="Ставится вручную. Ежемесячная оплата по умолчанию — 51 000 ₸. "
+                  "Отметка остаётся после очистки месяца и новой загрузки табеля.",
+    )
 
     class Meta:
         ordering = ["fio"]
@@ -81,19 +96,98 @@ def sync_children(p_ids=None):
     )
 
 
+def large_family_records(records):
+    """(месяц, p_id) строк табеля, чьи дети отмечены как многодетные. Отметка хранится у воспитанника;
+    ищем и по ИИН — в новом табеле у ребёнка может оказаться другой id."""
+    marked = Child.objects.filter(large_family=True).values_list("p_id", "iin")
+    p_ids = {p_id for p_id, _ in marked}
+    iins = {iin for _, iin in marked if iin}
+    return {(rec.month, rec.p_id) for rec in records if rec.p_id in p_ids or (rec.iin and rec.iin in iins)}
+
+
+def set_large_family(rec, value):
+    """Отметить ребёнка из строки табеля многодетным или снять отметку — у воспитанника, не у месяца."""
+    if value:
+        child, _ = Child.objects.get_or_create(p_id=rec.p_id, defaults={
+            "iin": rec.iin, "fio": rec.fio, "group_name": rec.group_name, "last_month": rec.month})
+        if not child.large_family:
+            child.large_family = True
+            child.save(update_fields=["large_family"])
+    else:  # снимаем у всех записей ребёнка, иначе отметка нашлась бы по ИИН
+        Child.objects.filter(Q(p_id=rec.p_id) | Q(iin=rec.iin) if rec.iin else Q(p_id=rec.p_id)).update(large_family=False)
+
+
+class Families:
+    """Семьи: дети, у которых общий родитель (по ИИН родителя из контактов e-orda) — чтобы показать братьев и сестёр.
+
+    Ребёнок в табеле может быть под разными id, поэтому дети сравниваются по ИИН, а без ИИН — по id."""
+
+    def __init__(self):
+        self.children = list(Child.objects.all())
+        self.iin_by_pid = {c.p_id: c.iin for c in self.children if c.iin}
+        self.parent = {}  # объединение в семьи: ребёнок или родитель → кто-то из той же семьи
+        for child_pid, child_iin, parent_iin in Guardian.objects.values_list("child_pid", "child_iin", "iin"):
+            if is_person_iin(parent_iin):
+                self._join(self.key(child_pid, child_iin), "parent " + parent_iin)
+        self.members = defaultdict(dict)  # семья → {ребёнок: воспитанник из последнего месяца}
+        for c in sorted(self.children, key=lambda c: c.last_month):
+            key = self.key(c.p_id, c.iin)
+            self.members[self._find(key)][key] = c
+
+    def key(self, p_id, iin=""):
+        return iin or self.iin_by_pid.get(p_id) or f"id {p_id}"
+
+    def _find(self, node):
+        while (up := self.parent.get(node, node)) != node:
+            self.parent[node] = self.parent.get(up, up)
+            node = up
+        return node
+
+    def _join(self, a, b):
+        a, b = self._find(a), self._find(b)
+        if a != b:
+            self.parent[a] = b
+
+    def siblings(self, p_id, iin=""):
+        """Братья и сёстры ребёнка — воспитанники с общим родителем."""
+        me = self.key(p_id, iin)
+        found = self.members[self._find(me)]
+        return sorted((c for key, c in found.items() if key != me), key=lambda c: c.fio)
+
+
+def is_person_iin(iin):
+    """ИИН из 12 цифр; заглушки вроде «000000000000» не считаются — иначе чужие дети стали бы семьёй."""
+    return bool(re.fullmatch(r"\d{12}", iin or "")) and len(set(iin)) > 1
+
+
 class PaymentInfo(models.Model):
-    """Оплата ребёнка за месяц: внесено и ежемесячная сумма."""
+    """Оплата ребёнка за месяц: сколько и как внесено, ежемесячная сумма."""
+
+    CASH, ONLINE = "cash", "online"
+    METHODS = [(CASH, "Наличные"), (ONLINE, "Онлайн")]
 
     child = models.OneToOneField(ChildRecord, on_delete=models.CASCADE, related_name="payment")
     last_payment = models.FloatField(default=0)
-    monthly_payment = models.FloatField(default=DEFAULT_MONTHLY)
+    method = models.CharField("Способ оплаты", max_length=10, choices=METHODS, blank=True)
+    # Пусто — по умолчанию: 51 000 многодетной семье, 60 000 остальным
+    monthly_payment = models.FloatField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Оплата за месяц"
         verbose_name_plural = "Оплаты за месяц"
 
     def __str__(self):
-        return f"{self.child.fio}: {self.monthly_payment}"
+        return f"{self.child.fio}: {self.monthly_payment or 'по умолчанию'}"
+
+
+def keep_old_monthly(before_month):
+    """Строкам табеля до месяца before_month без своей ежемесячной суммы — прежняя сумма по умолчанию:
+    так они и были посчитаны, новые суммы по умолчанию не должны менять долги задним числом."""
+    PaymentInfo.objects.bulk_create(
+        [PaymentInfo(child=rec, monthly_payment=OLD_DEFAULT_MONTHLY)
+         for rec in ChildRecord.objects.filter(month__lt=before_month, payment__isnull=True)],
+        batch_size=500,
+    )
 
 
 class ChangeLog(models.Model):

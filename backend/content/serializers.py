@@ -22,6 +22,8 @@ class GroupSerializer(serializers.ModelSerializer):
 
 
 class PersonSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(read_only=True)
+
     class Meta:
         model = Person
         exclude = ["order", "is_published", "show_photo"]

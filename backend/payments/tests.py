@@ -1,14 +1,23 @@
+import io
 import json
+import zipfile
 from datetime import date
 
 from django.contrib.auth.models import User
-from django.test import Client, TestCase
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import Client, TestCase, TransactionTestCase
+from django.utils import timezone
 
-from .models import ChangeLog, Child, ChildRecord, Guardian
-from .views import eorda_date
+from docx import Document
+
+from .contracts import birth_date
+from .models import ChangeLog, Child, ChildRecord, Families, Guardian, PaymentInfo
+from .views import eorda_date, shift_month
 
 EORDA = "https://int.indigo.nursultan.e-orda.kz"
-PAGES = ["/payments/", "/payments/debts/", "/payments/parents/", "/payments/changelog/", "/payments/child/1/", "/payments/print/2/"]
+PAGES = ["/payments/", "/payments/debts/", "/payments/parents/", "/payments/changelog/", "/payments/child/1/", "/payments/print/2/",
+         "/payments/child/1/contract/", "/payments/contracts/"]
 
 
 class AccessTests(TestCase):
@@ -114,10 +123,240 @@ class TimesheetApiTests(TestCase):
         ChildRecord.objects.create(month="2026-07", p_id=1, iin="190101500001", fio="Тестов Тест", group_id=2, group_name="Ромашка")
         Guardian.objects.create(child_pid=100, child_iin="190101500001", fio="Тестова Мама", phone="+77010000001")
         debts = self.client.get("/payments/debts/")
-        self.assertEqual(debts.context["total_owed"], 102000)
+        self.assertEqual(debts.context["total_owed"], 120000)  # 2 месяца по 60 000: братьев и сестёр в саду нет
         parents = self.client.get("/payments/parents/")
         self.assertContains(parents, "Тестова Мама")
         self.assertContains(parents, 'href="tel:+77010000001"')
+
+
+def record(p_id, iin, month="2026-09", group_id=1, group_name="Ромашка", fio=None):
+    return ChildRecord.objects.create(month=month, p_id=p_id, iin=iin, fio=fio or f"Ребёнок {p_id}",
+                                      group_id=group_id, group_name=group_name)
+
+
+def parent(child_pid, child_iin, iin, fio="Родитель"):
+    return Guardian.objects.create(child_pid=child_pid, child_iin=child_iin, iin=iin, fio=fio)
+
+
+class FamilyTests(TestCase):
+    """Многодетных отмечают вручную: ежемесячная по умолчанию 51 000, у остальных — 60 000.
+    Отметка — у воспитанника, поэтому остаётся после очистки месяца и новой загрузки табеля."""
+
+    MOTHER = "900101400001"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser("boss", password="pass-for-tests-1")
+        # брат и сестра — в разных группах; у брата в контактах e-orda другой id, чем в табеле
+        record(1, "200101500001", group_id=1, group_name="Ромашка", fio="Иванов Брат")
+        record(2, "210101600002", group_id=2, group_name="Солнышко", fio="Иванова Сестра")
+        record(3, "220101500003", group_id=1, group_name="Ромашка", fio="Петров Один")
+        Child.objects.create(p_id=1, iin="200101500001", fio="Иванов Брат", group_name="Ромашка", last_month="2026-09")
+        Child.objects.create(p_id=2, iin="210101600002", fio="Иванова Сестра", group_name="Солнышко", last_month="2026-09")
+        Child.objects.create(p_id=3, iin="220101500003", fio="Петров Один", group_name="Ромашка", last_month="2026-09")
+        parent(480001, "200101500001", cls.MOTHER, "Иванова Мама")
+        parent(2, "210101600002", cls.MOTHER, "Иванова Мама")
+        parent(3, "220101500003", "880101300003", "Петрова Мама")
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def post(self, path, data):
+        return self.client.post(path, json.dumps(data), content_type="application/json")
+
+    def monthly(self, month="2026-09"):
+        page = self.client.get(f"/payments/?month={month}")
+        return {r["pId"]: (r["monthly"], r["large_family"]) for r in page.context["records"]}
+
+    def test_children_of_one_parent_are_not_marked_automatically(self):
+        self.assertEqual(self.monthly(), {1: (60000, False), 2: (60000, False), 3: (60000, False)})
+        # связь с родителем остаётся: братья и сёстры видны в карточке
+        self.assertEqual([c.fio for c in Families().siblings(1, "200101500001")], ["Иванова Сестра"])
+        self.assertEqual(Families().siblings(3, "220101500003"), [])
+        page = self.client.get("/payments/child/1/?month=2026-09")
+        self.assertContains(page, 'href="/payments/child/2/?month=2026-09">Иванова Сестра</a>')
+
+    def test_mark_from_child_card(self):
+        totals = self.post("/payments/api/payment/", {"pId": 3, "month": "2026-09", "large_family": True}).json()["totals"]
+        self.assertEqual((totals["large_family"], totals["monthly"], totals["default_monthly"]), (True, 51000, 51000))
+        self.assertTrue(Child.objects.get(p_id=3).large_family)
+        self.assertFalse(PaymentInfo.objects.exists())  # оплату за месяц отметка не трогает
+        page = self.client.get("/payments/child/3/?month=2026-09")
+        self.assertContains(page, 'name="large_family" checked')
+        self.assertContains(page, 'placeholder="51')
+        self.assertContains(self.client.get("/payments/parents/"), "Многодетная семья", count=1)
+
+        totals = self.post("/payments/api/payment/", {"pId": 3, "month": "2026-09", "large_family": False}).json()["totals"]
+        self.assertEqual((totals["large_family"], totals["monthly"]), (False, 60000))
+        self.assertEqual(self.post("/payments/api/payment/", {"pId": 3, "month": "2026-09", "large_family": "да"}).status_code, 400)
+
+    def test_bulk_mark_survives_clearing_and_reloading_the_month(self):
+        r = self.post("/payments/api/payment/bulk/", {"month": "2026-09", "pIds": [1, 2], "large_family": True})
+        self.assertEqual([(row["pId"], row["large_family"], row["monthly"]) for row in r.json()["rows"]],
+                         [(1, True, 51000), (2, True, 51000)])
+
+        self.post("/payments/api/clear/", {"month": "2026-09"})
+        rows = [{"pId": p_id, "i": iin, "fio": "Ребёнок", "gId": 1, "gn": "Ромашка"}
+                for p_id, iin in ((1, "200101500001"), (2, "210101600002"), (3, "220101500003"))]
+        self.post("/payments/api/receive/", {"month": "2026-09", "result": rows})
+        self.assertEqual(self.monthly(), {1: (51000, True), 2: (51000, True), 3: (60000, False)})
+        # и в новом месяце
+        self.post("/payments/api/receive/", {"month": "2026-10", "result": rows[:1]})
+        self.assertEqual(self.monthly("2026-10"), {1: (51000, True)})
+
+    def test_mark_is_found_by_iin_when_the_id_changes(self):
+        Child.objects.filter(p_id=1).update(large_family=True)
+        record(77, "200101500001", month="2026-10", fio="Иванов Брат")  # в новом табеле другой id
+        self.assertEqual(self.monthly("2026-10"), {77: (51000, True)})
+        # снять отметку можно и под новым id
+        self.post("/payments/api/payment/", {"pId": 77, "month": "2026-10", "large_family": False})
+        self.assertEqual(self.monthly("2026-10"), {77: (60000, False)})
+        self.assertFalse(Child.objects.filter(large_family=True).exists())
+
+    def test_own_monthly_sum_overrides_the_default(self):
+        Child.objects.filter(p_id=1).update(large_family=True)
+        r = self.post("/payments/api/payment/", {"pId": 1, "month": "2026-09", "monthly": "45 000"}).json()["totals"]
+        self.assertEqual((r["monthly"], r["monthly_default"]), (45000, False))
+        r = self.post("/payments/api/payment/", {"pId": 1, "month": "2026-09", "monthly": ""}).json()["totals"]
+        self.assertEqual((r["monthly"], r["monthly_default"]), (51000, True))
+        self.assertIsNone(PaymentInfo.objects.get().monthly_payment)
+
+
+class PaymentMarkTests(TestCase):
+    """Отметка оплаты в табеле: наличные или онлайн, по одному ребёнку и сразу у нескольких."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser("boss", password="pass-for-tests-1")
+        cls.editor = User.objects.create_user("editor", password="pass-for-tests-2", is_staff=True)
+        for p_id in (1, 2, 3):
+            record(p_id, f"20010150000{p_id}")
+        record(1, "200101500001", month="2026-10")
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def post(self, path, data):
+        return self.client.post(path, json.dumps(data), content_type="application/json")
+
+    def pay(self, p_id, **data):
+        return self.post("/payments/api/payment/", {"pId": p_id, "month": "2026-09", **data})
+
+    def state(self, p_id, month="2026-09"):
+        pay = PaymentInfo.objects.get(child__p_id=p_id, child__month=month)
+        return pay.method, pay.last_payment, pay.monthly_payment
+
+    def test_marking_payment_fills_the_amount_due(self):
+        self.post("/payments/api/absence/", {"pId": 1, "month": "2026-09", "day": 1, "status": "ОР"})
+        totals = self.pay(1, method="cash").json()["totals"]
+        self.assertEqual((totals["method"], totals["last_payment"], totals["overpay"]), ("cash", 57272.73, 0))
+
+        self.pay(1, method="online")  # сумма уже есть — остаётся
+        self.assertEqual(self.state(1), ("online", 57272.73, None))
+        self.pay(1, last_payment="30 000")  # частичная оплата
+        self.assertEqual(self.state(1), ("online", 30000, None))
+
+        self.pay(1, method="")  # отметку сняли — оплаты нет
+        self.assertEqual(self.state(1), ("", 0, None))
+        self.pay(1, method="cash")
+        self.pay(1, last_payment="0")  # оплата 0 — без способа
+        self.assertEqual(self.state(1), ("", 0, None))
+
+    def test_unknown_method_is_refused(self):
+        for method in ("card", None, ["cash"]):
+            self.assertEqual(self.pay(1, method=method).status_code, 400, method)
+        self.assertFalse(PaymentInfo.objects.exists())
+
+    def test_timesheet_page_has_payment_controls(self):
+        self.pay(2, method="online")
+        page = self.client.get("/payments/?month=2026-09")
+        self.assertContains(page, 'class="pay-method"', count=3)
+        self.assertContains(page, '<option value="online" selected>Онлайн</option>', count=1)
+        self.assertContains(page, 'data-method="online" data-paid="60000.0"')
+        self.assertContains(page, 'id="bulkbar"')
+
+    def test_bulk_marks_payment_for_chosen_children_of_the_month(self):
+        self.pay(2, last_payment="10000")
+        r = self.post("/payments/api/payment/bulk/", {"month": "2026-09", "pIds": [1, 2, 99], "method": "cash"})
+        self.assertEqual(sorted(row["pId"] for row in r.json()["rows"]), [1, 2])
+        self.assertEqual(self.state(1), ("cash", 60000, None))
+        self.assertEqual(self.state(2), ("cash", 10000, None))  # внесённая сумма остаётся
+        self.assertFalse(PaymentInfo.objects.filter(child__p_id=3).exists())
+        self.assertFalse(PaymentInfo.objects.filter(child__month="2026-10").exists())  # другой месяц не тронут
+
+        self.post("/payments/api/payment/bulk/", {"month": "2026-09", "pIds": [1, 2], "method": ""})
+        self.assertEqual([self.state(1), self.state(2)], [("", 0, None), ("", 0, None)])
+
+    def test_bulk_changes_monthly_sum_and_back_to_default(self):
+        r = self.post("/payments/api/payment/bulk/", {"month": "2026-09", "pIds": [1, 3], "monthly": "55 000"})
+        self.assertEqual([row["monthly"] for row in r.json()["rows"]], [55000, 55000])
+        self.assertEqual(self.state(3), ("", 0, 55000))
+        # сентябрь: 1 и 3 — по 55 000, 2 — 60 000; октябрь: 1 — 60 000
+        self.assertEqual(self.client.get("/payments/debts/").context["total_owed"], 55000 * 2 + 60000 * 2)
+
+        r = self.post("/payments/api/payment/bulk/", {"month": "2026-09", "pIds": [1, 3], "monthly": ""})
+        self.assertEqual([(row["monthly"], row["monthly_default"]) for row in r.json()["rows"]], [(60000, True)] * 2)
+
+    def test_bulk_validates_everything_before_saving(self):
+        bad = [
+            {"month": "2026-09", "pIds": [1], "monthly": "0"},
+            {"month": "2026-09", "pIds": [1], "monthly": "много"},
+            {"month": "2026-09", "pIds": [1], "method": "card"},
+            {"month": "2026-09", "pIds": [1, "x"], "method": "cash"},
+            {"month": "2026-09", "pIds": [], "method": "cash"},
+            {"month": "2026-09", "pIds": [1]},
+            {"month": "сентябрь", "pIds": [1], "method": "cash"},
+        ]
+        for body in bad:
+            self.assertEqual(self.post("/payments/api/payment/bulk/", body).status_code, 400, body)
+        self.assertFalse(PaymentInfo.objects.exists())
+
+        self.client.force_login(self.editor)
+        body = {"month": "2026-09", "pIds": [1], "method": "cash"}
+        self.assertEqual(self.post("/payments/api/payment/bulk/", body).status_code, 403)
+        self.assertFalse(PaymentInfo.objects.exists())
+
+
+class NewDefaultsMigrationTests(TransactionTestCase):
+    """Новые суммы по умолчанию — с текущего месяца; прошлые месяцы считаются по-прежнему."""
+
+    before = [("payments", "0006_child_contract_guardian_gender")]
+    after = [("payments", "0007_family_payment_method")]
+
+    def migrate(self, target):
+        executor = MigrationExecutor(connection)
+        executor.migrate(target)
+        return executor.loader.project_state(target).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(MigrationExecutor(connection).loader.graph.leaf_nodes())
+
+    def test_past_months_keep_old_default(self):
+        apps = self.migrate(self.before)
+        ChildRecord_, PaymentInfo_ = apps.get_model("payments", "ChildRecord"), apps.get_model("payments", "PaymentInfo")
+        current = timezone.localdate().strftime("%Y-%m")
+        past = shift_month(current, -1)
+        old_untouched = ChildRecord_.objects.create(month=past, p_id=1, fio="Прошлый", group_id=1)
+        old_custom = ChildRecord_.objects.create(month=past, p_id=2, fio="Своя сумма", group_id=1)
+        PaymentInfo_.objects.create(child=old_custom, last_payment=40000, monthly_payment=45000)
+        now_untouched = ChildRecord_.objects.create(month=current, p_id=1, fio="Сейчас", group_id=1)
+        now_old_default = ChildRecord_.objects.create(month=current, p_id=2, fio="Прежняя по умолчанию", group_id=1)
+        PaymentInfo_.objects.create(child=now_old_default, last_payment=51000, monthly_payment=51000)
+
+        apps = self.migrate(self.after)
+        PaymentInfo_ = apps.get_model("payments", "PaymentInfo")
+        monthly = dict(PaymentInfo_.objects.values_list("child_id", "monthly_payment"))
+        self.assertEqual(monthly, {old_untouched.pk: 51000, old_custom.pk: 45000, now_old_default.pk: None})
+        self.assertNotIn(now_untouched.pk, monthly)  # по умолчанию: 60 000 или 51 000 многодетной семье
+
+    def test_large_family_becomes_manual_only(self):
+        apps = self.migrate([("payments", "0007_family_payment_method")])
+        Child_ = apps.get_model("payments", "Child")
+        for p_id, value in ((1, None), (2, True), (3, False)):
+            Child_.objects.create(p_id=p_id, fio=f"Ребёнок {p_id}", large_family=value)
+        apps = self.migrate([("payments", "0008_large_family_manual")])
+        marks = dict(apps.get_model("payments", "Child").objects.values_list("p_id", "large_family"))
+        self.assertEqual(marks, {1: False, 2: True, 3: False})
 
 
 class BookmarkletTests(TestCase):
@@ -305,3 +544,81 @@ class MedjournalIntegrationTests(TestCase):
         self.assertFalse(self.client.get("/api/auth/me/").json()["can_access_medjournal"])
         self.client.force_login(self.admin)
         self.assertTrue(self.client.get("/api/auth/me/").json()["can_access_medjournal"])
+
+
+class ContractTests(TestCase):
+    """Договор в Word: родитель, ребёнок, дата рождения, группа и реквизиты родителя — из табеля и e-orda."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser("boss", password="pass-for-tests-1")
+        record(1, "200315600123", fio="ТЕСТОВА АРУЖАН", group_name="Ромашка")
+        record(2, "210101500002", fio="ТЕСТОВ БЕЗ РОДИТЕЛЕЙ", group_id=2, group_name="Солнышко")
+        cls.father = Guardian.objects.create(child_pid=480001, child_iin="200315600123", gender=Guardian.FATHER,
+                                             fio="ТЕСТОВ ОТЕЦ", iin="880101300001", phone="+77030000003")
+        cls.mother = Guardian.objects.create(child_pid=1, gender=Guardian.MOTHER, fio="ТЕСТОВА <МАТЬ> & Ко",
+                                             iin="900101400001", phone="+77010000001, +77020000002")
+        cls.stranger = Guardian.objects.create(child_pid=99, fio="ЧУЖОЙ")
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def text(self, data):
+        doc = Document(io.BytesIO(data))  # открывается как настоящий .docx
+        return "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+
+    def test_contract_is_filled_for_the_mother_by_default(self):
+        r = self.client.get("/payments/child/1/contract/?month=2026-09")
+        self.assertEqual(r["Content-Type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        self.assertIn("attachment", r["Content-Disposition"])
+        text = self.text(b"".join(r.streaming_content))
+        for part in ("родитель (законный представитель) ТЕСТОВА <МАТЬ> & Ко (далее – Родитель) ребёнка ТЕСТОВА АРУЖАН, "
+                     "дата рождения 15.03.2020",
+                     "және ТЕСТОВА АРУЖАН (бұдан әрі – Тәрбиеленуші), туған күні 15.03.2020, баланың ата-анасы "
+                     "(заңды өкілі) ТЕСТОВА <МАТЬ> & Ко",
+                     "в группу Ромашка и", "Тәрбиеленушіні Ромашка тобына",
+                     "ТАӘ / ФИО: ТЕСТОВА <МАТЬ> & Ко", "ЖСН / ИИН: 900101400001", "Тел.: +77010000001, +77020000002"):
+            self.assertIn(part, text)
+        self.assertNotIn("{{", text)
+        self.assertIn("Уд. личности № ____", text)  # чего нет на сайте — вписывают от руки
+
+    def test_contract_for_the_chosen_parent_only_of_this_child(self):
+        r = self.client.get(f"/payments/child/1/contract/?month=2026-09&guardian={self.father.pk}")
+        text = self.text(b"".join(r.streaming_content))
+        self.assertIn("ТАӘ / ФИО: ТЕСТОВ ОТЕЦ", text)
+        self.assertIn("ЖСН / ИИН: 880101300001", text)
+        r = self.client.get(f"/payments/child/1/contract/?month=2026-09&guardian={self.stranger.pk}")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(self.client.get("/payments/child/1/contract/?month=2026-02").status_code, 404)
+
+    def test_without_parents_blanks_stay_for_handwriting(self):
+        text = self.text(b"".join(self.client.get("/payments/child/2/contract/?month=2026-09").streaming_content))
+        self.assertIn("родитель (законный представитель) " + "_" * 24 + " (далее – Родитель) ребёнка ТЕСТОВ БЕЗ РОДИТЕЛЕЙ", text)
+        self.assertIn("ТАӘ / ФИО: " + "_" * 30, text)
+        self.assertIn("в группу Солнышко и", text)
+        self.assertNotIn("{{", text)
+
+    def test_archive_has_a_contract_for_each_child(self):
+        record(3, "190101500003", fio="ТЕСТОВА АРУЖАН", group_name="Ромашка")  # тёзка
+        r = self.client.get("/payments/contracts/?month=2026-09")
+        self.assertEqual(r["Content-Type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(b"".join(r.streaming_content))) as zf:
+            self.assertEqual(set(zf.namelist()), {"Договор — ТЕСТОВА АРУЖАН (2).docx", "Договор — ТЕСТОВА АРУЖАН.docx",
+                                                  "Договор — ТЕСТОВ БЕЗ РОДИТЕЛЕЙ.docx"})
+            self.assertIn("ТАӘ / ФИО: ТЕСТОВА <МАТЬ> & Ко", self.text(zf.read("Договор — ТЕСТОВА АРУЖАН.docx")))
+
+        r = self.client.get("/payments/contracts/?month=2026-09&group=2")
+        with zipfile.ZipFile(io.BytesIO(b"".join(r.streaming_content))) as zf:
+            self.assertEqual(zf.namelist(), ["Договор — ТЕСТОВ БЕЗ РОДИТЕЛЕЙ.docx"])
+        self.assertEqual(self.client.get("/payments/contracts/?month=2026-02").status_code, 404)
+
+    def test_buttons_on_pages(self):
+        self.assertContains(self.client.get("/payments/?month=2026-09"), 'href="/payments/contracts/?month=2026-09"')
+        self.assertContains(self.client.get("/payments/child/1/?month=2026-09"),
+                            f'href="/payments/child/1/contract/?month=2026-09&amp;guardian={self.mother.pk}"')
+
+    def test_birth_date_from_iin(self):
+        cases = {"200315600123": date(2020, 3, 15), "991231300001": date(1999, 12, 31),
+                 "200315900123": None, "200230600123": None, "12345": None, "": None, None: None}
+        for iin, expected in cases.items():
+            self.assertEqual(birth_date(iin), expected, iin)

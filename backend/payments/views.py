@@ -1,5 +1,6 @@
 """Табель и оплаты: страницы раздела /payments/ и JSON-API для них (только администратор)."""
 import calendar
+import io
 import json
 import math
 import re
@@ -13,14 +14,17 @@ from django.contrib.auth import logout
 from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from . import contracts
 from .access import admin_api, admin_required
-from .models import DEFAULT_MONTHLY, ChangeLog, Child, ChildRecord, Guardian, PaymentInfo, guardian_match, sync_children
+from .models import (DEFAULT_MONTHLY, LARGE_FAMILY_MONTHLY, ChangeLog, Child, ChildRecord, Families, Guardian,
+                     PaymentInfo, default_monthly, guardian_match, large_family_records, set_large_family,
+                     sync_children)
 
 # Расчёт оплаты: отпуск (ОР) вычитается по дням, больничный (БР) — фиксированно, если дней больше порога
 WORK_DAYS = 22
@@ -40,6 +44,7 @@ ABSENCE_LABELS = {
 }
 # Отметки, которые можно поставить вручную: присутствие, выходной, причина отсутствия или «очистить»
 DAY_STATUSES = {"present", "weekend", "clear", *ABSENCE_LABELS}
+PAY_METHODS = dict(PaymentInfo.METHODS)
 
 
 # ---------- месяцы ----------
@@ -132,8 +137,9 @@ def calc_due(monthly, vacation_days, sick_days):
     return round(due, 2)
 
 
-def summarize(rec):
-    """Строка табеля: отметки по дням, счётчики и расчёт оплаты за месяц."""
+def summarize(rec, large_family=False):
+    """Строка табеля: отметки по дням, счётчики и расчёт оплаты за месяц.
+    large_family — ребёнок отмечен многодетным (large_family_records): от этого зависит сумма по умолчанию."""
     marks = json.loads(rec.days_json or "{}")
     days = []
     for num in range(1, days_in_month(rec.month) + 1):
@@ -142,15 +148,19 @@ def summarize(rec):
     reasons = Counter(d["ct"] for d in days if d["type"] == "absent_reason")
     vacation, sick = reasons["ОР"], reasons["БР"]
     pay = getattr(rec, "payment", None)
-    monthly = pay.monthly_payment if pay else DEFAULT_MONTHLY
+    own_monthly = pay.monthly_payment if pay else None
+    monthly = default_monthly(large_family) if own_monthly is None else own_monthly
     paid = pay.last_payment if pay else 0
+    method = pay.method if pay else ""
     total = calc_due(monthly, vacation, sick)
     return {
         "pId": rec.p_id, "fio": rec.fio, "iin": rec.iin, "age": rec.age,
         "group": rec.group_name, "group_id": rec.group_id, "month": rec.month,
         "days": days, "present": sum(d["type"] == "present" for d in days),
-        "vacation_days": vacation, "sick_days": sick,
-        "monthly": monthly, "last_payment": paid, "total": total, "overpay": round(paid - total, 2),
+        "vacation_days": vacation, "sick_days": sick, "large_family": large_family,
+        "monthly": monthly, "monthly_default": own_monthly is None, "default_monthly": default_monthly(large_family),
+        "last_payment": paid, "method": method, "method_label": PAY_METHODS.get(method, ""),
+        "total": total, "overpay": round(paid - total, 2),
     }
 
 
@@ -163,20 +173,29 @@ def absences(days):
     return [{"code": code, "label": ABSENCE_LABELS.get(code, code), "days": nums} for code, nums in by_code.items()]
 
 
-def child_totals(rec):
-    """Итоги месяца для карточки ребёнка — отдаются после каждого изменения."""
-    s = summarize(rec)
-    totals = {key: s[key] for key in ("present", "vacation_days", "sick_days", "total", "overpay")}
-    return {**totals, "absences": absences(s["days"])}
+def child_totals(rec, large_family):
+    """Итоги месяца и оплата ребёнка — отдаются страницам после каждого изменения."""
+    s = summarize(rec, large_family)
+    keys = ("present", "vacation_days", "sick_days", "large_family", "monthly", "monthly_default", "default_monthly",
+            "last_payment", "method", "total", "overpay")
+    return {**{key: s[key] for key in keys}, "absences": absences(s["days"])}
+
+
+def is_large_family(rec):
+    """Отмечен ли ребёнок из этой строки табеля многодетным."""
+    return bool(large_family_records([rec]))
 
 
 def balances():
     """Внесено и начислено по каждому ребёнку за все месяцы; самый большой долг — первым."""
+    records = list(ChildRecord.objects.select_related("payment").order_by("month"))
+    large = large_family_records(records)
     children = {}
-    for rec in ChildRecord.objects.select_related("payment").order_by("month"):
-        s = summarize(rec)
+    for rec in records:
+        s = summarize(rec, (rec.month, rec.p_id) in large)
         child = children.setdefault(rec.p_id, {"pId": rec.p_id, "months": []})
-        child.update(fio=rec.fio, iin=rec.iin, group=rec.group_name, month=rec.month)  # данные последнего месяца
+        # данные последнего месяца
+        child.update(fio=rec.fio, iin=rec.iin, group=rec.group_name, month=rec.month, large_family=s["large_family"])
         child["months"].append({"label": month_label(rec.month), "paid": s["last_payment"],
                                 "due": s["total"], "diff": s["overpay"]})
     for child in children.values():
@@ -193,6 +212,7 @@ def balances():
 def index(request):
     month, months = resolve_month(request)
     records = list(ChildRecord.objects.filter(month=month).select_related("payment"))
+    large = large_family_records(records)
 
     counts = Counter((r.group_id, r.group_name) for r in records)
     groups = sorted(({"gid": str(gid), "name": name, "count": n} for (gid, name), n in counts.items()),
@@ -207,7 +227,10 @@ def index(request):
     if month not in months:
         months = sorted([month, *months], reverse=True)
     return render(request, "payments/index.html", {
-        "records": [summarize(r) for r in records],
+        "records": [summarize(r, (r.month, r.p_id) in large) for r in records],
+        "pay_methods": PaymentInfo.METHODS,
+        "default_monthly": DEFAULT_MONTHLY,
+        "large_family_monthly": LARGE_FAMILY_MONTHLY,
         "groups": groups,
         "group": group,
         "total_all": sum(g["count"] for g in groups),
@@ -226,10 +249,13 @@ def child_detail(request, p_id):
     rec = ChildRecord.objects.filter(p_id=p_id, month=month).select_related("payment").first()
     context = {"month": month, "month_label": month_label(month)}
     if rec:
-        child = summarize(rec)
+        child = summarize(rec, is_large_family(rec))
         context.update({
             "child": child,
             "pupil": Child.objects.filter(p_id=rec.p_id).first(),  # адрес и договор из e-orda
+            "siblings": Families().siblings(rec.p_id, rec.iin),
+            "pay_methods": PaymentInfo.METHODS,
+            "large_family_monthly": LARGE_FAMILY_MONTHLY,
             "absences": absences(child["days"]),
             "blank_days": range(date(int(month[:4]), int(month[5:7]), 1).weekday()),  # пустые клетки до 1-го числа
             "guardians": Guardian.objects.filter(guardian_match(rec.p_id, rec.iin)),
@@ -274,10 +300,12 @@ def parents_page(request):
         by_pid[g.child_pid].append(g)
         if g.child_iin:
             by_iin[g.child_iin].append(g)
+    families = Families()
     rows = balances()
     for row in rows:
         found = by_pid[row["pId"]] + (by_iin[row["iin"]] if row["iin"] else [])
         row["guardians"] = list({g.pk: g for g in found}.values())
+        row["siblings"] = families.siblings(row["pId"], row["iin"])
     return render(request, "payments/parents.html", {
         "rows": rows,
         "with_contacts": sum(1 for r in rows if r["guardians"]),
@@ -297,6 +325,40 @@ def print_group(request, gid):
         "day_nums": range(1, days_in_month(month) + 1),
         "absence_labels": ABSENCE_LABELS,
     })
+
+
+@admin_required
+def contract(request, p_id):
+    """Договор ребёнка в Word; ?guardian= — на кого из родителей, иначе на мать (нет — на отца)."""
+    month = resolve_month(request)[0]
+    rec = ChildRecord.objects.filter(p_id=p_id, month=month).first()
+    if rec is None:
+        raise Http404("Ребёнка нет в табеле за этот месяц")
+    found = contracts.parents(rec)
+    parent = found[0] if found else None
+    if request.GET.get("guardian"):
+        parent = next((g for g in found if str(g.pk) == request.GET["guardian"]), None)
+        if parent is None:
+            raise Http404("Это не родитель этого ребёнка")
+    data = contracts.contract_docx(contracts.contract_fields(rec, parent))
+    return FileResponse(io.BytesIO(data), as_attachment=True, filename=contracts.file_name(rec),
+                        content_type=contracts.CONTENT_TYPE)
+
+
+@admin_required
+def contracts_zip(request):
+    """Договоры всех детей табеля за месяц (или одной группы) — архив .zip."""
+    month = resolve_month(request)[0]
+    records = ChildRecord.objects.filter(month=month)
+    group = request.GET.get("group", "")
+    if group.isdigit():
+        records = records.filter(group_id=int(group))
+    records = list(records)
+    if not records:
+        raise Http404("Нет детей в табеле за этот месяц")
+    title = " — ".join(filter(None, ["Договоры", month_label(month), records[0].group_name if group.isdigit() else ""]))
+    return FileResponse(io.BytesIO(contracts.contracts_zip(records)), as_attachment=True,
+                        filename=f"{title}.zip", content_type="application/zip")
 
 
 @require_POST
@@ -340,6 +402,60 @@ def parse_amount(value):
     return amount if math.isfinite(amount) else None
 
 
+def payment_changes(data):
+    """Изменения оплаты из запроса: {поле: значение}. ValueError — с текстом для пользователя."""
+    changes = {}
+    if "monthly" in data:
+        if not str(data["monthly"] or "").strip():
+            changes["monthly"] = None  # по умолчанию
+        else:
+            monthly = parse_amount(data["monthly"])
+            if monthly is None or monthly <= 0:
+                raise ValueError("Ежемесячная оплата — положительное число")
+            changes["monthly"] = monthly
+    if "last_payment" in data:
+        paid = parse_amount(data["last_payment"] or 0)
+        if paid is None or paid < 0:
+            raise ValueError("Оплата — неотрицательное число")
+        changes["last_payment"] = paid
+    if "method" in data:
+        if not isinstance(data["method"], str) or data["method"] not in ("", *PAY_METHODS):
+            raise ValueError("Способ оплаты — наличные или онлайн")
+        changes["method"] = data["method"]
+    if "large_family" in data:
+        if not isinstance(data["large_family"], bool):
+            raise ValueError("Многодетная семья — да или нет")
+        changes["large_family"] = data["large_family"]
+    return changes
+
+
+def apply_payment(rec, changes, large_family):
+    """Сохранить оплату за месяц и отметку «многодетная» (она — у воспитанника, на все месяцы).
+    Оплата, отмеченная без суммы, — на всю сумму к оплате; снятая отметка — оплаты нет; оплата 0 — без способа.
+    Возвращает, многодетный ли ребёнок после изменений."""
+    if "large_family" in changes:
+        large_family = changes["large_family"]
+        set_large_family(rec, large_family)
+    if changes.keys() <= {"large_family"}:
+        return large_family
+    pay = getattr(rec, "payment", None) or PaymentInfo(child=rec)
+    rec.payment = pay
+    if "monthly" in changes:
+        pay.monthly_payment = changes["monthly"]
+    if "last_payment" in changes:
+        pay.last_payment = changes["last_payment"]
+        if not pay.last_payment:
+            pay.method = ""
+    if "method" in changes:
+        pay.method = changes["method"]
+        if not pay.method:
+            pay.last_payment = 0
+        elif not pay.last_payment:
+            pay.last_payment = max(0, summarize(rec, large_family)["total"])
+    pay.save()
+    return large_family
+
+
 @require_POST
 @admin_api
 def save_payment(request):
@@ -347,20 +463,42 @@ def save_payment(request):
     rec = find_record(data)
     if rec is None:
         return error("Ребёнок не найден в табеле за этот месяц", 404)
-    pay, _ = PaymentInfo.objects.get_or_create(child=rec)
-    if "last_payment" in data:
-        paid = parse_amount(data["last_payment"] or 0)
-        if paid is None or paid < 0:
-            return error("Оплата — неотрицательное число")
-        pay.last_payment = paid
-    if "monthly" in data:
-        monthly = parse_amount(data["monthly"] or DEFAULT_MONTHLY)
-        if monthly is None or monthly <= 0:
-            return error("Ежемесячная оплата — положительное число")
-        pay.monthly_payment = monthly
-    pay.save()
-    rec.payment = pay
-    return JsonResponse({"ok": True, "totals": child_totals(rec)})
+    try:
+        changes = payment_changes(data)
+    except ValueError as e:
+        return error(str(e))
+    large = apply_payment(rec, changes, is_large_family(rec))
+    return JsonResponse({"ok": True, "totals": child_totals(rec, large)})
+
+
+@require_POST
+@admin_api
+def bulk_payment(request):
+    """Оплата, ежемесячная сумма или отметка «многодетная» сразу у нескольких детей за месяц."""
+    data = load_json(request)
+    month, p_ids = data.get("month"), data.get("pIds")
+    if not is_month(month) or not isinstance(p_ids, list) or not p_ids:
+        return error("Не выбраны дети")
+    try:
+        changes = payment_changes(data)
+    except ValueError as e:
+        return error(str(e))
+    if not changes:
+        return error("Не указано, что изменить")
+    ids = set()
+    for p_id in p_ids:
+        try:
+            ids.add(int(p_id))
+        except (TypeError, ValueError):
+            return error("Не выбраны дети")
+    records = list(ChildRecord.objects.filter(month=month, p_id__in=ids).select_related("payment"))
+    large = large_family_records(records)
+    rows = []
+    with transaction.atomic():
+        for rec in records:
+            now_large = apply_payment(rec, changes, (month, rec.p_id) in large)
+            rows.append({"pId": rec.p_id, **child_totals(rec, now_large)})
+    return JsonResponse({"ok": True, "rows": rows})
 
 
 @require_POST
@@ -396,7 +534,7 @@ def save_absence(request):
             day_num=day, old_status=old, new_status=new,
         )
     return JsonResponse({"ok": True, "type": kind, "ct": code, "label": ABSENCE_LABELS.get(code, ""),
-                         "totals": child_totals(rec)})
+                         "totals": child_totals(rec, is_large_family(rec))})
 
 
 @require_POST

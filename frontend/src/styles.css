@@ -216,6 +216,10 @@ html[data-images="off"] .hero { grid-template-columns: 1fr; }
 .facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; font-size: 0.9375rem; }
 .facts dt { color: var(--ink-soft); }
 .facts dd { margin: 0; }
+/* в узкой карточке педагога подпись — над значением, иначе длинные подписи сжимают значения в столбик */
+.people-teacher .facts { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.people-teacher .facts dt { margin-top: 0.6rem; font-size: 0.8125rem; }
+.people-teacher .facts dt:first-child { margin-top: 0; }
 
 /* ===== Таблицы ===== */
 .table-wrap { overflow-x: auto; }
