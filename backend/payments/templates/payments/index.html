@@ -159,6 +159,7 @@
       </select>
       <span class="count" aria-live="polite">Детей: <b id="shown">{{ records|length }}</b></span>
       <div class="toolbar-end">
+        <a class="btn" href="{% url 'payments:contracts' %}?month={{ month }}{% if group %}&amp;group={{ group.gid }}{% endif %}" title="Архив: договор в Word на каждого ребёнка в списке{% if group %} группы{% endif %}. Родитель — мать, если её нет в контактах, — отец">Договоры (Word)</a>
         {% if group %}<a class="btn" href="{% url 'payments:print_group' group.gid %}?month={{ month }}" target="_blank">Печать группы</a>{% endif %}
         <button type="button" class="btn btn-danger" id="clear-month">Очистить месяц</button>
       </div>

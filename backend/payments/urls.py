@@ -12,6 +12,8 @@ urlpatterns = [
     path("debts/", views.debts, name="debts"),
     path("parents/", views.parents_page, name="parents"),
     path("print/<int:gid>/", views.print_group, name="print_group"),
+    path("child/<int:p_id>/contract/", views.contract, name="contract"),
+    path("contracts/", views.contracts_zip, name="contracts"),
     path("logout/", views.logout_view, name="logout"),
     # для страниц раздела
     path("api/payment/", views.save_payment, name="save_payment"),

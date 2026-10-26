@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from datetime import date
 
 from django.contrib.auth.models import User
@@ -7,11 +9,15 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import Client, TestCase, TransactionTestCase
 from django.utils import timezone
 
+from docx import Document
+
+from .contracts import birth_date
 from .models import ChangeLog, Child, ChildRecord, Families, Guardian, PaymentInfo
 from .views import eorda_date, shift_month
 
 EORDA = "https://int.indigo.nursultan.e-orda.kz"
-PAGES = ["/payments/", "/payments/debts/", "/payments/parents/", "/payments/changelog/", "/payments/child/1/", "/payments/print/2/"]
+PAGES = ["/payments/", "/payments/debts/", "/payments/parents/", "/payments/changelog/", "/payments/child/1/", "/payments/print/2/",
+         "/payments/child/1/contract/", "/payments/contracts/"]
 
 
 class AccessTests(TestCase):
@@ -538,3 +544,81 @@ class MedjournalIntegrationTests(TestCase):
         self.assertFalse(self.client.get("/api/auth/me/").json()["can_access_medjournal"])
         self.client.force_login(self.admin)
         self.assertTrue(self.client.get("/api/auth/me/").json()["can_access_medjournal"])
+
+
+class ContractTests(TestCase):
+    """Договор в Word: родитель, ребёнок, дата рождения, группа и реквизиты родителя — из табеля и e-orda."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser("boss", password="pass-for-tests-1")
+        record(1, "200315600123", fio="ТЕСТОВА АРУЖАН", group_name="Ромашка")
+        record(2, "210101500002", fio="ТЕСТОВ БЕЗ РОДИТЕЛЕЙ", group_id=2, group_name="Солнышко")
+        cls.father = Guardian.objects.create(child_pid=480001, child_iin="200315600123", gender=Guardian.FATHER,
+                                             fio="ТЕСТОВ ОТЕЦ", iin="880101300001", phone="+77030000003")
+        cls.mother = Guardian.objects.create(child_pid=1, gender=Guardian.MOTHER, fio="ТЕСТОВА <МАТЬ> & Ко",
+                                             iin="900101400001", phone="+77010000001, +77020000002")
+        cls.stranger = Guardian.objects.create(child_pid=99, fio="ЧУЖОЙ")
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def text(self, data):
+        doc = Document(io.BytesIO(data))  # открывается как настоящий .docx
+        return "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+
+    def test_contract_is_filled_for_the_mother_by_default(self):
+        r = self.client.get("/payments/child/1/contract/?month=2026-09")
+        self.assertEqual(r["Content-Type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        self.assertIn("attachment", r["Content-Disposition"])
+        text = self.text(b"".join(r.streaming_content))
+        for part in ("родитель (законный представитель) ТЕСТОВА <МАТЬ> & Ко (далее – Родитель) ребёнка ТЕСТОВА АРУЖАН, "
+                     "дата рождения 15.03.2020",
+                     "және ТЕСТОВА АРУЖАН (бұдан әрі – Тәрбиеленуші), туған күні 15.03.2020, баланың ата-анасы "
+                     "(заңды өкілі) ТЕСТОВА <МАТЬ> & Ко",
+                     "в группу Ромашка и", "Тәрбиеленушіні Ромашка тобына",
+                     "ТАӘ / ФИО: ТЕСТОВА <МАТЬ> & Ко", "ЖСН / ИИН: 900101400001", "Тел.: +77010000001, +77020000002"):
+            self.assertIn(part, text)
+        self.assertNotIn("{{", text)
+        self.assertIn("Уд. личности № ____", text)  # чего нет на сайте — вписывают от руки
+
+    def test_contract_for_the_chosen_parent_only_of_this_child(self):
+        r = self.client.get(f"/payments/child/1/contract/?month=2026-09&guardian={self.father.pk}")
+        text = self.text(b"".join(r.streaming_content))
+        self.assertIn("ТАӘ / ФИО: ТЕСТОВ ОТЕЦ", text)
+        self.assertIn("ЖСН / ИИН: 880101300001", text)
+        r = self.client.get(f"/payments/child/1/contract/?month=2026-09&guardian={self.stranger.pk}")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(self.client.get("/payments/child/1/contract/?month=2026-02").status_code, 404)
+
+    def test_without_parents_blanks_stay_for_handwriting(self):
+        text = self.text(b"".join(self.client.get("/payments/child/2/contract/?month=2026-09").streaming_content))
+        self.assertIn("родитель (законный представитель) " + "_" * 24 + " (далее – Родитель) ребёнка ТЕСТОВ БЕЗ РОДИТЕЛЕЙ", text)
+        self.assertIn("ТАӘ / ФИО: " + "_" * 30, text)
+        self.assertIn("в группу Солнышко и", text)
+        self.assertNotIn("{{", text)
+
+    def test_archive_has_a_contract_for_each_child(self):
+        record(3, "190101500003", fio="ТЕСТОВА АРУЖАН", group_name="Ромашка")  # тёзка
+        r = self.client.get("/payments/contracts/?month=2026-09")
+        self.assertEqual(r["Content-Type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(b"".join(r.streaming_content))) as zf:
+            self.assertEqual(set(zf.namelist()), {"Договор — ТЕСТОВА АРУЖАН (2).docx", "Договор — ТЕСТОВА АРУЖАН.docx",
+                                                  "Договор — ТЕСТОВ БЕЗ РОДИТЕЛЕЙ.docx"})
+            self.assertIn("ТАӘ / ФИО: ТЕСТОВА <МАТЬ> & Ко", self.text(zf.read("Договор — ТЕСТОВА АРУЖАН.docx")))
+
+        r = self.client.get("/payments/contracts/?month=2026-09&group=2")
+        with zipfile.ZipFile(io.BytesIO(b"".join(r.streaming_content))) as zf:
+            self.assertEqual(zf.namelist(), ["Договор — ТЕСТОВ БЕЗ РОДИТЕЛЕЙ.docx"])
+        self.assertEqual(self.client.get("/payments/contracts/?month=2026-02").status_code, 404)
+
+    def test_buttons_on_pages(self):
+        self.assertContains(self.client.get("/payments/?month=2026-09"), 'href="/payments/contracts/?month=2026-09"')
+        self.assertContains(self.client.get("/payments/child/1/?month=2026-09"),
+                            f'href="/payments/child/1/contract/?month=2026-09&amp;guardian={self.mother.pk}"')
+
+    def test_birth_date_from_iin(self):
+        cases = {"200315600123": date(2020, 3, 15), "991231300001": date(1999, 12, 31),
+                 "200315900123": None, "200230600123": None, "12345": None, "": None, None: None}
+        for iin, expected in cases.items():
+            self.assertEqual(birth_date(iin), expected, iin)

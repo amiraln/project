@@ -158,11 +158,13 @@
               {% if g.iin %}<span class="muted">ИИН {{ g.iin }}</span>{% endif %}
             </div>
           </div>
+          <a class="btn" href="{% url 'payments:contract' child.pId %}?month={{ month }}&amp;guardian={{ g.pk }}" title="Договор в Word: родитель — {{ g.fio }}">Договор</a>
         </li>
         {% endfor %}
       </ul>
       {% else %}
       <p class="none">Контакты не загружены. Их, а также адрес и договор, можно загрузить из e-orda закладкой «Родители».</p>
+      <p class="hint"><a class="btn" href="{% url 'payments:contract' child.pId %}?month={{ month }}">Договор без данных родителя</a></p>
       {% endif %}
     </section>
   </div>

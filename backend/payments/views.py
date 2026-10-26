@@ -1,5 +1,6 @@
 """Табель и оплаты: страницы раздела /payments/ и JSON-API для них (только администратор)."""
 import calendar
+import io
 import json
 import math
 import re
@@ -13,12 +14,13 @@ from django.contrib.auth import logout
 from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from . import contracts
 from .access import admin_api, admin_required
 from .models import (DEFAULT_MONTHLY, LARGE_FAMILY_MONTHLY, ChangeLog, Child, ChildRecord, Families, Guardian,
                      PaymentInfo, default_monthly, guardian_match, large_family_records, set_large_family,
@@ -323,6 +325,40 @@ def print_group(request, gid):
         "day_nums": range(1, days_in_month(month) + 1),
         "absence_labels": ABSENCE_LABELS,
     })
+
+
+@admin_required
+def contract(request, p_id):
+    """Договор ребёнка в Word; ?guardian= — на кого из родителей, иначе на мать (нет — на отца)."""
+    month = resolve_month(request)[0]
+    rec = ChildRecord.objects.filter(p_id=p_id, month=month).first()
+    if rec is None:
+        raise Http404("Ребёнка нет в табеле за этот месяц")
+    found = contracts.parents(rec)
+    parent = found[0] if found else None
+    if request.GET.get("guardian"):
+        parent = next((g for g in found if str(g.pk) == request.GET["guardian"]), None)
+        if parent is None:
+            raise Http404("Это не родитель этого ребёнка")
+    data = contracts.contract_docx(contracts.contract_fields(rec, parent))
+    return FileResponse(io.BytesIO(data), as_attachment=True, filename=contracts.file_name(rec),
+                        content_type=contracts.CONTENT_TYPE)
+
+
+@admin_required
+def contracts_zip(request):
+    """Договоры всех детей табеля за месяц (или одной группы) — архив .zip."""
+    month = resolve_month(request)[0]
+    records = ChildRecord.objects.filter(month=month)
+    group = request.GET.get("group", "")
+    if group.isdigit():
+        records = records.filter(group_id=int(group))
+    records = list(records)
+    if not records:
+        raise Http404("Нет детей в табеле за этот месяц")
+    title = " — ".join(filter(None, ["Договоры", month_label(month), records[0].group_name if group.isdigit() else ""]))
+    return FileResponse(io.BytesIO(contracts.contracts_zip(records)), as_attachment=True,
+                        filename=f"{title}.zip", content_type="application/zip")
 
 
 @require_POST
